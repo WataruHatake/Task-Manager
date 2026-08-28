@@ -1,0 +1,4 @@
+PySide6-Essentials==6.10.3
+SQLAlchemy==2.0.52
+alembic==1.19.1
+jpholiday==1.0.3

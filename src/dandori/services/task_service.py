@@ -1,0 +1,198 @@
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from datetime import date, datetime, time
+
+from sqlalchemy import Select, or_, select
+from sqlalchemy.orm import selectinload
+
+from dandori.domain.enums import ACTIVE_STATUSES, Priority, TaskStatus
+from dandori.infrastructure.database import Database
+from dandori.infrastructure.models import Category, Task, TaskHistory, local_now
+
+
+@dataclass(frozen=True)
+class TaskInput:
+    title: str
+    memo: str = ""
+    status: TaskStatus = TaskStatus.TODO
+    priority: Priority = Priority.NORMAL
+    due_date: date | None = None
+    due_time: time | None = None
+    category_id: str | None = None
+
+
+class TaskService:
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+    @staticmethod
+    def _task_query() -> Select:
+        return select(Task).options(
+            selectinload(Task.category),
+            selectinload(Task.subtasks),
+            selectinload(Task.tags),
+        )
+
+    def list_categories(self) -> list[Category]:
+        with self.database.session() as session:
+            return list(session.scalars(select(Category).order_by(Category.name)))
+
+    def default_category(self) -> Category:
+        categories = self.list_categories()
+        for category in categories:
+            if category.name == "未分類":
+                return category
+        if not categories:
+            raise RuntimeError("初期カテゴリがありません。")
+        return categories[0]
+
+    def list_active_tasks(self, search_text: str = "") -> list[Task]:
+        with self.database.session() as session:
+            statement = self._task_query().where(
+                Task.deleted_at.is_(None),
+                Task.status.in_([status.value for status in ACTIVE_STATUSES]),
+            )
+            if search_text.strip():
+                value = f"%{search_text.strip()}%"
+                statement = statement.where(or_(Task.title.like(value), Task.memo.like(value)))
+            tasks = list(session.scalars(statement))
+        return sorted(tasks, key=self._sort_key)
+
+    def list_tasks_for_date(self, target_date: date) -> list[Task]:
+        return [
+            task
+            for task in self.list_active_tasks()
+            if task.due_at is not None and task.due_at.date() == target_date
+        ]
+
+    def get_task(self, task_id: str) -> Task | None:
+        with self.database.session() as session:
+            return session.scalar(self._task_query().where(Task.id == task_id))
+
+    def create_task(self, task_input: TaskInput) -> Task:
+        title = task_input.title.strip()
+        if not title:
+            raise ValueError("タスク名を入力してください。")
+        category_id = task_input.category_id or self.default_category().id
+        due_at, due_has_time = self._to_due_at(task_input.due_date, task_input.due_time)
+        task = Task(
+            title=title,
+            memo=task_input.memo.strip(),
+            status=task_input.status.value,
+            priority=int(task_input.priority),
+            due_at=due_at,
+            due_has_time=due_has_time,
+            category_id=category_id,
+        )
+        with self.database.session() as session:
+            session.add(task)
+            session.flush()
+            session.add(
+                TaskHistory(
+                    task_id=task.id,
+                    action="created",
+                    after_json=json.dumps(self._snapshot(task), ensure_ascii=False),
+                )
+            )
+            session.commit()
+            return session.scalar(self._task_query().where(Task.id == task.id))
+
+    def update_task(self, task_id: str, task_input: TaskInput) -> Task:
+        title = task_input.title.strip()
+        if not title:
+            raise ValueError("タスク名を入力してください。")
+        with self.database.session() as session:
+            task = session.get(Task, task_id)
+            if task is None:
+                raise LookupError("タスクが見つかりません。")
+            before = self._snapshot(task)
+            due_at, due_has_time = self._to_due_at(task_input.due_date, task_input.due_time)
+            task.title = title
+            task.memo = task_input.memo.strip()
+            task.status = task_input.status.value
+            task.priority = int(task_input.priority)
+            task.due_at = due_at
+            task.due_has_time = due_has_time
+            task.category_id = task_input.category_id or self.default_category().id
+            task.updated_at = local_now()
+            task.version += 1
+            self._apply_terminal_dates(task)
+            session.flush()
+            session.add(
+                TaskHistory(
+                    task_id=task.id,
+                    action="updated",
+                    before_json=json.dumps(before, ensure_ascii=False),
+                    after_json=json.dumps(self._snapshot(task), ensure_ascii=False),
+                )
+            )
+            session.commit()
+            return session.scalar(self._task_query().where(Task.id == task.id))
+
+    def complete_task(self, task_id: str) -> Task:
+        task = self.get_task(task_id)
+        if task is None:
+            raise LookupError("タスクが見つかりません。")
+        return self.update_task(
+            task_id,
+            TaskInput(
+                title=task.title,
+                memo=task.memo,
+                status=TaskStatus.COMPLETED,
+                priority=task.priority_enum,
+                due_date=task.due_at.date() if task.due_at else None,
+                due_time=task.due_at.time() if task.due_at and task.due_has_time else None,
+                category_id=task.category_id,
+            ),
+        )
+
+    @staticmethod
+    def _to_due_at(due_date: date | None, due_time: time | None) -> tuple[datetime | None, bool]:
+        if due_date is None:
+            return None, False
+        if due_time is None:
+            return datetime.combine(due_date, time(17, 0)), False
+        return datetime.combine(due_date, due_time.replace(second=0, microsecond=0)), True
+
+    @staticmethod
+    def _apply_terminal_dates(task: Task) -> None:
+        if task.status == TaskStatus.COMPLETED.value:
+            task.completed_at = task.completed_at or local_now()
+            task.cancelled_at = None
+        elif task.status == TaskStatus.CANCELLED.value:
+            task.cancelled_at = task.cancelled_at or local_now()
+            task.completed_at = None
+        else:
+            task.completed_at = None
+            task.cancelled_at = None
+
+    @staticmethod
+    def _snapshot(task: Task) -> dict[str, object]:
+        return {
+            "title": task.title,
+            "memo": task.memo,
+            "status": task.status,
+            "priority": task.priority,
+            "due_at": task.due_at.isoformat() if task.due_at else None,
+            "due_has_time": task.due_has_time,
+            "category_id": task.category_id,
+        }
+
+    @staticmethod
+    def _sort_key(task: Task) -> tuple[int, datetime, int, str]:
+        now = local_now()
+        if task.due_at is None:
+            bucket = 3
+            due = datetime.max
+        elif task.due_at < now:
+            bucket = 0
+            due = task.due_at
+        elif task.due_at.date() == now.date():
+            bucket = 1
+            due = task.due_at
+        else:
+            bucket = 2
+            due = task.due_at
+        return bucket, due, -task.priority, task.title.casefold()
