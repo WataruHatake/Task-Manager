@@ -144,6 +144,45 @@ class TaskService:
             tasks = list(session.scalars(statement))
         return sorted(tasks, key=self._sort_key)
 
+    def list_tasks_for_view(self, view: str, search_text: str = "") -> list[Task]:
+        if view == "completed":
+            with self.database.session() as session:
+                statement = self._task_query().where(
+                    Task.deleted_at.is_(None),
+                    Task.status.in_(
+                        (TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value)
+                    ),
+                )
+                if search_text.strip():
+                    value = f"%{search_text.strip()}%"
+                    statement = statement.where(
+                        or_(Task.title.like(value), Task.memo.like(value))
+                    )
+                tasks = list(session.scalars(statement))
+            return sorted(
+                tasks,
+                key=lambda task: (
+                    task.completed_at or task.cancelled_at or task.updated_at
+                ),
+                reverse=True,
+            )
+
+        tasks = self.list_active_tasks(search_text)
+        now = local_now()
+        if view == "today":
+            return [
+                task
+                for task in tasks
+                if task.due_at is not None and task.due_at.date() == now.date()
+            ]
+        if view == "overdue":
+            return [
+                task
+                for task in tasks
+                if task.due_at is not None and task.due_at < now
+            ]
+        return tasks
+
     def list_tasks_for_date(self, target_date: date) -> list[Task]:
         return [
             task
@@ -225,6 +264,23 @@ class TaskService:
                 title=task.title,
                 memo=task.memo,
                 status=TaskStatus.COMPLETED,
+                priority=task.priority_enum,
+                due_date=task.due_at.date() if task.due_at else None,
+                due_time=task.due_at.time() if task.due_at and task.due_has_time else None,
+                category_id=task.category_id,
+            ),
+        )
+
+    def restore_task(self, task_id: str) -> Task:
+        task = self.get_task(task_id)
+        if task is None:
+            raise LookupError("タスクが見つかりません。")
+        return self.update_task(
+            task_id,
+            TaskInput(
+                title=task.title,
+                memo=task.memo,
+                status=TaskStatus.TODO,
                 priority=task.priority_enum,
                 due_date=task.due_at.date() if task.due_at else None,
                 due_time=task.due_at.time() if task.due_at and task.due_has_time else None,

@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import date, time
 
 from PySide6.QtCore import QDate
+from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDateEdit,
     QDialog,
@@ -15,12 +15,13 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from dandori.domain.enums import Priority, TaskStatus
+from dandori.domain.enums import ACTIVE_STATUSES, Priority, TaskStatus
 from dandori.infrastructure.models import Task
 from dandori.services.task_service import TaskInput, TaskService
 from dandori.ui.category_dialog import CategoryManagerDialog
@@ -33,14 +34,18 @@ class TaskDialog(QDialog):
         task_service: TaskService,
         task: Task | None = None,
         initial_date: date | None = None,
+        initial_input: TaskInput | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.task_service = task_service
         self.task = task
         self.saved_task: Task | None = None
+        self.initial_date = initial_date
+        self._allow_close = False
         self.setWindowTitle("タスクを編集" if task else "タスクを追加")
-        self.setMinimumWidth(460)
+        self.setMinimumSize(360, 400)
+        self.resize(520, 620)
 
         title = QLabel("タスクを編集" if task else "タスクを追加")
         title.setObjectName("pageTitle")
@@ -52,7 +57,8 @@ class TaskDialog(QDialog):
         self.memo_edit.setMinimumHeight(90)
 
         self.status_combo = QComboBox()
-        for status in TaskStatus:
+        statuses = tuple(TaskStatus) if task else ACTIVE_STATUSES
+        for status in statuses:
             self.status_combo.addItem(status.label, status)
 
         self.priority_combo = QComboBox()
@@ -62,7 +68,6 @@ class TaskDialog(QDialog):
         self.category_combo = QComboBox()
         self._reload_categories()
         category_manage_button = QPushButton("管理")
-        category_manage_button.setObjectName("compactButton")
         category_manage_button.clicked.connect(self._manage_categories)
         category_row = QWidget()
         category_layout = QHBoxLayout(category_row)
@@ -71,27 +76,37 @@ class TaskDialog(QDialog):
         category_layout.addWidget(self.category_combo, 1)
         category_layout.addWidget(category_manage_button)
 
-        self.due_enabled = QCheckBox("期限を設定")
+        self.due_mode = QComboBox()
+        self.due_mode.addItem("期限なし", "none")
+        self.due_mode.addItem("日付のみ", "date")
+        self.due_mode.addItem("日時を指定", "datetime")
         self.due_date_edit = QDateEdit()
         self.due_date_edit.setCalendarPopup(True)
         self.due_date_edit.setDisplayFormat("yyyy/MM/dd")
         base_date = initial_date or date.today()
         self.due_date_edit.setDate(QDate(base_date.year, base_date.month, base_date.day))
-        self.due_time_enabled = QCheckBox("時刻を指定")
         self.due_time_edit = TimeComboBox()
         self.due_time_edit.set_time(time(17, 0))
 
-        form = QFormLayout()
+        form_widget = QWidget()
+        form = QFormLayout(form_widget)
+        form.setContentsMargins(0, 0, 0, 0)
         form.setSpacing(10)
-        form.addRow("タスク名", self.title_edit)
+        form.addRow("タスク名 *", self.title_edit)
         form.addRow("メモ", self.memo_edit)
         form.addRow("状態", self.status_combo)
         form.addRow("重要度", self.priority_combo)
         form.addRow("カテゴリ", category_row)
-        form.addRow("", self.due_enabled)
+        form.addRow("期限", self.due_mode)
         form.addRow("期限日", self.due_date_edit)
-        form.addRow("", self.due_time_enabled)
         form.addRow("期限時刻", self.due_time_edit)
+        self.due_date_label = form.labelForField(self.due_date_edit)
+        self.due_time_label = form.labelForField(self.due_time_edit)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setWidget(form_widget)
 
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
@@ -104,21 +119,53 @@ class TaskDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 22, 22, 18)
-        layout.setSpacing(16)
+        layout.setSpacing(12)
         layout.addWidget(title)
-        layout.addLayout(form)
+        layout.addWidget(scroll, 1)
         layout.addWidget(self.buttons)
 
-        self.due_enabled.toggled.connect(self._sync_due_controls)
-        self.due_time_enabled.toggled.connect(self._sync_due_controls)
-        self._load_task(task)
+        self.due_mode.currentIndexChanged.connect(self._sync_due_controls)
+        self._load_task(task, initial_input)
         self._sync_due_controls()
+        self._initial_state = self._draft_state()
+        QShortcut(QKeySequence("Ctrl+Return"), self).activated.connect(self._save)
+        QShortcut(QKeySequence("Ctrl+Enter"), self).activated.connect(self._save)
         self.title_edit.setFocus()
 
-    def _load_task(self, task: Task | None) -> None:
+    def _load_task(self, task: Task | None, initial_input: TaskInput | None) -> None:
         if task is None:
             self.priority_combo.setCurrentIndex(int(Priority.NORMAL) - 1)
             self.status_combo.setCurrentIndex(0)
+            default_id = self.task_service.default_category().id
+            self.category_combo.setCurrentIndex(self.category_combo.findData(default_id))
+            if initial_input is not None:
+                self.title_edit.setText(initial_input.title)
+                self.memo_edit.setPlainText(initial_input.memo)
+                self.status_combo.setCurrentIndex(
+                    max(0, self.status_combo.findData(initial_input.status))
+                )
+                self.priority_combo.setCurrentIndex(
+                    self.priority_combo.findData(initial_input.priority)
+                )
+                category_id = initial_input.category_id or default_id
+                self.category_combo.setCurrentIndex(
+                    self.category_combo.findData(category_id)
+                )
+                if initial_input.due_date is not None:
+                    self.due_date_edit.setDate(
+                        QDate(
+                            initial_input.due_date.year,
+                            initial_input.due_date.month,
+                            initial_input.due_date.day,
+                        )
+                    )
+                    self.due_mode.setCurrentIndex(
+                        2 if initial_input.due_time is not None else 1
+                    )
+                    if initial_input.due_time is not None:
+                        self.due_time_edit.set_time(initial_input.due_time)
+            elif self.initial_date is not None:
+                self.due_mode.setCurrentIndex(1)
             return
         self.title_edit.setText(task.title)
         self.memo_edit.setPlainText(task.memo)
@@ -126,13 +173,16 @@ class TaskDialog(QDialog):
         self.priority_combo.setCurrentIndex(self.priority_combo.findData(task.priority_enum))
         self.category_combo.setCurrentIndex(self.category_combo.findData(task.category_id))
         if task.due_at:
-            self.due_enabled.setChecked(True)
             self.due_date_edit.setDate(QDate(task.due_at.year, task.due_at.month, task.due_at.day))
-            self.due_time_enabled.setChecked(task.due_has_time)
+            self.due_mode.setCurrentIndex(2 if task.due_has_time else 1)
             self.due_time_edit.set_time(time(task.due_at.hour, task.due_at.minute))
 
     def _reload_categories(self, preferred_id: str | None = None) -> None:
-        preferred_id = preferred_id or self.category_combo.currentData()
+        preferred_id = (
+            preferred_id
+            or self.category_combo.currentData()
+            or self.task_service.default_category().id
+        )
         self.category_combo.clear()
         for category in self.task_service.list_categories():
             self.category_combo.addItem(category.name, category.id)
@@ -148,18 +198,21 @@ class TaskDialog(QDialog):
         self._reload_categories(preferred_id)
 
     def _sync_due_controls(self) -> None:
-        enabled = self.due_enabled.isChecked()
-        self.due_date_edit.setEnabled(enabled)
-        self.due_time_enabled.setEnabled(enabled)
-        self.due_time_edit.setEnabled(enabled and self.due_time_enabled.isChecked())
+        mode = self.due_mode.currentData()
+        has_date = mode in ("date", "datetime")
+        has_time = mode == "datetime"
+        self.due_date_label.setVisible(has_date)
+        self.due_date_edit.setVisible(has_date)
+        self.due_time_label.setVisible(has_time)
+        self.due_time_edit.setVisible(has_time)
 
     def _task_input(self) -> TaskInput:
         due_date_value = None
         due_time_value = None
-        if self.due_enabled.isChecked():
+        if self.due_mode.currentData() in ("date", "datetime"):
             selected_date = self.due_date_edit.date()
             due_date_value = date(selected_date.year(), selected_date.month(), selected_date.day())
-            if self.due_time_enabled.isChecked():
+            if self.due_mode.currentData() == "datetime":
                 due_time_value = self.due_time_edit.time_value()
         return TaskInput(
             title=self.title_edit.text(),
@@ -181,4 +234,45 @@ class TaskDialog(QDialog):
         except (ValueError, LookupError) as error:
             QMessageBox.warning(self, "保存できません", str(error))
             return
+        self._allow_close = True
         self.accept()
+
+    def _draft_state(self) -> tuple[object, ...]:
+        return (
+            self.title_edit.text(),
+            self.memo_edit.toPlainText(),
+            self.status_combo.currentData(),
+            self.priority_combo.currentData(),
+            self.category_combo.currentData(),
+            self.due_mode.currentData(),
+            self.due_date_edit.date().toString("yyyy-MM-dd"),
+            self.due_time_edit.currentText(),
+        )
+
+    def _confirm_discard(self) -> bool:
+        if (
+            self._allow_close
+            or not self.isVisible()
+            or self._draft_state() == self._initial_state
+        ):
+            return True
+        answer = QMessageBox.question(
+            self,
+            "変更を破棄",
+            "入力中の変更を破棄して閉じますか？",
+            QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        return answer == QMessageBox.StandardButton.Discard
+
+    def reject(self) -> None:
+        if self._confirm_discard():
+            self._allow_close = True
+            super().reject()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._confirm_discard():
+            self._allow_close = True
+            event.accept()
+        else:
+            event.ignore()

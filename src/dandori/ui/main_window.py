@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import date
+
 from PySide6.QtCore import Signal
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QKeySequence, QResizeEvent, QShortcut
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -21,20 +23,30 @@ from dandori.ui.calendar_page import CalendarPage
 from dandori.ui.category_dialog import CategoryManagerDialog
 from dandori.ui.task_dialog import TaskDialog
 from dandori.ui.task_views import TaskTablePage
+from dandori.ui.undo_bar import UndoBar
 
 
 class MainWindow(QMainWindow):
     edge_tasks_requested = Signal()
     edge_add_requested = Signal()
     theme_requested = Signal()
+    hidden_to_tray = Signal()
+
+    VIEW_TITLES = {
+        "today": "今日のタスク",
+        "all": "すべてのタスク",
+        "overdue": "期限切れ",
+        "completed": "完了済み・取り消し",
+    }
 
     def __init__(self, task_service: TaskService, parent=None) -> None:
         super().__init__(parent)
         self.task_service = task_service
+        self.current_task_view = "today"
         self.hide_to_tray = False
         self.setWindowTitle("タスク管理")
-        self.resize(1160, 760)
-        self.setMinimumSize(860, 600)
+        self.resize(1080, 720)
+        self.setMinimumSize(720, 480)
 
         self.sidebar = self._build_sidebar()
         self.table_page = TaskTablePage()
@@ -43,7 +55,7 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self.table_page)
         self.pages.addWidget(self.calendar_page)
 
-        self.page_title = QLabel("タスク一覧")
+        self.page_title = QLabel(self.VIEW_TITLES[self.current_task_view])
         self.page_title.setObjectName("pageTitle")
         heading_layout = QVBoxLayout()
         heading_layout.setSpacing(1)
@@ -51,6 +63,7 @@ class MainWindow(QMainWindow):
 
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("タスク名・メモを検索")
+        self.search_edit.setClearButtonEnabled(True)
         self.search_edit.textChanged.connect(self.refresh)
 
         self.list_button = QPushButton("一覧")
@@ -85,6 +98,9 @@ class MainWindow(QMainWindow):
         content_layout.setSpacing(12)
         content_layout.addLayout(header)
         content_layout.addWidget(self.search_edit)
+        self.undo_bar = UndoBar()
+        self.undo_bar.undo_requested.connect(self._restore_task)
+        content_layout.addWidget(self.undo_bar)
         content_layout.addWidget(self.pages, 1)
 
         root = QWidget()
@@ -97,29 +113,40 @@ class MainWindow(QMainWindow):
 
         self.table_page.edit_requested.connect(self._edit_task)
         self.table_page.complete_requested.connect(self._complete_task)
+        self.table_page.restore_requested.connect(self._restore_task)
+        self.table_page.add_requested.connect(self._create_task)
         self.calendar_page.edit_requested.connect(self._edit_task)
         self.calendar_page.complete_requested.connect(self._complete_task)
+        self.calendar_page.add_requested.connect(self._create_task_for_date)
+        QShortcut(QKeySequence("Ctrl+F"), self).activated.connect(self._focus_search)
+        QShortcut(QKeySequence("Ctrl+N"), self).activated.connect(self._create_task)
         self.refresh()
 
     def _build_sidebar(self) -> QFrame:
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(176)
-        today = QPushButton("▣  今日")
-        today.setObjectName("navButton")
-        today.setCheckable(True)
-        today.setChecked(True)
-        all_tasks = QPushButton("□  すべて")
-        all_tasks.setObjectName("navButton")
-        overdue = QPushButton("！  期限切れ")
-        overdue.setObjectName("navButton")
-        completed = QPushButton("✓  完了済み")
-        completed.setObjectName("navButton")
-        trash = QPushButton("○  ゴミ箱")
-        trash.setObjectName("navButton")
-        for button in (all_tasks, overdue, completed, trash):
-            button.setEnabled(False)
-            button.setToolTip("第二段階で実装予定")
+        navigation = (
+            ("today", "▣  今日"),
+            ("all", "□  すべて"),
+            ("overdue", "！  期限切れ"),
+            ("completed", "✓  完了済み"),
+        )
+        self.nav_buttons: dict[str, QPushButton] = {}
+        nav_group = QButtonGroup(self)
+        nav_group.setExclusive(True)
+        for view, text in navigation:
+            button = QPushButton(text)
+            button.setObjectName("navButton")
+            button.setCheckable(True)
+            button.setChecked(view == self.current_task_view)
+            button.clicked.connect(
+                lambda _checked=False, selected_view=view: self._set_task_view(
+                    selected_view
+                )
+            )
+            nav_group.addButton(button)
+            self.nav_buttons[view] = button
 
         theme_button = QPushButton("カラーテーマ")
         theme_button.clicked.connect(lambda: self.theme_requested.emit())
@@ -130,7 +157,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(13, 22, 13, 16)
         layout.setSpacing(4)
         layout.addSpacing(8)
-        for button in (today, all_tasks, overdue, completed, trash):
+        for button in self.nav_buttons.values():
             layout.addWidget(button)
         layout.addStretch()
         layout.addWidget(category_button)
@@ -144,17 +171,46 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def refresh(self, preferred_task_id: str | None = None) -> None:
-        tasks = self.task_service.list_active_tasks(self.search_edit.text())
+        self.table_page.set_empty_context(self.current_task_view)
+        tasks = self.task_service.list_tasks_for_view(
+            self.current_task_view, self.search_edit.text()
+        )
         self.table_page.set_tasks(tasks, preferred_task_id)
         self.calendar_page.refresh()
 
+    def _set_task_view(self, view: str) -> None:
+        if self.pages.currentWidget() is self.calendar_page:
+            self.list_button.click()
+        self.current_task_view = view
+        self.page_title.setText(self.VIEW_TITLES[view])
+        self.calendar_button.setEnabled(view != "completed")
+        if view == "completed" and self.pages.currentWidget() is self.calendar_page:
+            self.list_button.click()
+        self.refresh()
+
     def _change_view(self, view_id: int) -> None:
+        if view_id == 1 and self.current_task_view != "all":
+            self.current_task_view = "all"
+            self.nav_buttons["all"].setChecked(True)
+            self.refresh()
         self.pages.setCurrentIndex(view_id)
-        self.page_title.setText("タスク一覧" if view_id == 0 else "カレンダー")
+        self.page_title.setText(
+            self.VIEW_TITLES[self.current_task_view] if view_id == 0 else "カレンダー"
+        )
         self.search_edit.setVisible(view_id == 0)
 
     def _create_task(self) -> None:
-        dialog = TaskDialog(self.task_service, parent=self)
+        initial_date = (
+            self.calendar_page.selected_date
+            if self.pages.currentWidget() is self.calendar_page
+            else None
+        )
+        dialog = TaskDialog(self.task_service, initial_date=initial_date, parent=self)
+        if dialog.exec() and dialog.saved_task:
+            self.refresh(dialog.saved_task.id)
+
+    def _create_task_for_date(self, selected_date: date) -> None:
+        dialog = TaskDialog(self.task_service, initial_date=selected_date, parent=self)
         if dialog.exec() and dialog.saved_task:
             self.refresh(dialog.saved_task.id)
 
@@ -170,10 +226,26 @@ class MainWindow(QMainWindow):
     def _complete_task(self, task_id: str) -> None:
         self.task_service.complete_task(task_id)
         self.refresh()
+        self.undo_bar.show_for_task(task_id)
+
+    def _restore_task(self, task_id: str) -> None:
+        self.task_service.restore_task(task_id)
+        self.refresh(task_id)
+
+    def _focus_search(self) -> None:
+        if self.pages.currentWidget() is not self.table_page:
+            self.list_button.click()
+        self.search_edit.setFocus()
+        self.search_edit.selectAll()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        self.sidebar.setFixedWidth(140 if event.size().width() < 900 else 176)
+        super().resizeEvent(event)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.hide_to_tray:
             event.ignore()
             self.hide()
+            self.hidden_to_tray.emit()
             return
         event.accept()

@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import date
 
 from PySide6.QtCore import QDate, Qt, Signal
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -34,6 +35,7 @@ class CalendarCell(QFrame):
         self.cell_date = cell_date
         self.setObjectName("calendarCell")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self.day_button = QPushButton(str(cell_date.day))
         self.day_button.setObjectName(
@@ -46,7 +48,7 @@ class CalendarCell(QFrame):
         )
         if cell_date.month != shown_month:
             self.setProperty("outsideMonth", True)
-            self.day_button.setStyleSheet("color: #666D66;")
+            self.day_button.setProperty("outsideMonth", True)
 
         self.task_layout = QVBoxLayout()
         self.task_layout.setContentsMargins(0, 0, 0, 0)
@@ -67,6 +69,13 @@ class CalendarCell(QFrame):
         self.style().unpolish(self)
         self.style().polish(self)
 
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.date_selected.emit(
+                QDate(self.cell_date.year, self.cell_date.month, self.cell_date.day)
+            )
+        super().mouseReleaseEvent(event)
+
     def set_tasks(self, tasks: list[Task]) -> None:
         while self.task_layout.count():
             item = self.task_layout.takeAt(0)
@@ -83,14 +92,19 @@ class CalendarCell(QFrame):
             )
             self.task_layout.addWidget(button)
         if len(tasks) > 2:
-            more = QLabel(f"他{len(tasks) - 2}件")
-            more.setObjectName("muted")
-            more.setAlignment(Qt.AlignmentFlag.AlignLeft)
+            more = QPushButton(f"他{len(tasks) - 2}件")
+            more.setObjectName("calendarMore")
+            more.clicked.connect(
+                lambda: self.date_selected.emit(
+                    QDate(self.cell_date.year, self.cell_date.month, self.cell_date.day)
+                )
+            )
             self.task_layout.addWidget(more)
 
 
 class DayTaskList(QFrame):
     task_selected = Signal(str)
+    add_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -99,6 +113,9 @@ class DayTaskList(QFrame):
         self.heading.setObjectName("detailTitle")
         self.count_label = QLabel()
         self.count_label.setObjectName("muted")
+        add_button = QPushButton("＋ この日に追加")
+        add_button.setObjectName("primaryButton")
+        add_button.clicked.connect(lambda: self.add_requested.emit())
 
         self.content = QWidget()
         self.content_layout = QVBoxLayout(self.content)
@@ -116,6 +133,7 @@ class DayTaskList(QFrame):
         layout.setSpacing(5)
         layout.addWidget(self.heading)
         layout.addWidget(self.count_label)
+        layout.addWidget(add_button)
         layout.addSpacing(6)
         layout.addWidget(scroll)
 
@@ -150,6 +168,7 @@ class DayTaskList(QFrame):
 class CalendarPage(QWidget):
     edit_requested = Signal(str)
     complete_requested = Signal(str)
+    add_requested = Signal(object)
 
     def __init__(self, task_service: TaskService, parent=None) -> None:
         super().__init__(parent)
@@ -162,14 +181,17 @@ class CalendarPage(QWidget):
 
         self.previous_button = QPushButton("‹")
         self.next_button = QPushButton("›")
+        self.today_button = QPushButton("今日")
         self.month_label = QLabel()
         self.month_label.setObjectName("detailTitle")
         self.previous_button.clicked.connect(lambda: self._change_month(-1))
         self.next_button.clicked.connect(lambda: self._change_month(1))
+        self.today_button.clicked.connect(self._go_today)
 
         month_header = QHBoxLayout()
         month_header.addWidget(self.month_label)
         month_header.addStretch()
+        month_header.addWidget(self.today_button)
         month_header.addWidget(self.previous_button)
         month_header.addWidget(self.next_button)
 
@@ -189,6 +211,9 @@ class CalendarPage(QWidget):
 
         self.day_list = DayTaskList()
         self.day_list.task_selected.connect(self._show_task)
+        self.day_list.add_requested.connect(
+            lambda: self.add_requested.emit(self.selected_date)
+        )
         self.task_detail = TaskDetailWidget()
         self.task_detail.edit_requested.connect(self.edit_requested)
         self.task_detail.complete_requested.connect(self.complete_requested)
@@ -202,8 +227,8 @@ class CalendarPage(QWidget):
         detail_layout.addWidget(self.task_detail)
 
         self.side_stack = QStackedWidget()
-        self.side_stack.setMinimumWidth(245)
-        self.side_stack.setMaximumWidth(330)
+        self.side_stack.setMinimumWidth(210)
+        self.side_stack.setMaximumWidth(320)
         self.side_stack.addWidget(self.day_list)
         self.side_stack.addWidget(detail_container)
 
@@ -254,7 +279,7 @@ class CalendarPage(QWidget):
         for row, week in enumerate(weeks[:6], start=1):
             for column, cell_date in enumerate(week):
                 cell = CalendarCell(cell_date, self.shown_month)
-                cell.setMinimumHeight(66)
+                cell.setMinimumHeight(52)
                 cell.date_selected.connect(self._qdate_selected)
                 cell.task_selected.connect(self._task_label_selected)
                 self.grid.addWidget(cell, row, column)
@@ -265,6 +290,13 @@ class CalendarPage(QWidget):
         self.shown_year, month_zero = divmod(month_index, 12)
         self.shown_month = month_zero + 1
         self.selected_date = date(self.shown_year, self.shown_month, 1)
+        self._rebuild_grid()
+        self.refresh()
+
+    def _go_today(self) -> None:
+        self.selected_date = date.today()
+        self.shown_year = self.selected_date.year
+        self.shown_month = self.selected_date.month
         self._rebuild_grid()
         self.refresh()
 
@@ -284,6 +316,7 @@ class CalendarPage(QWidget):
         if task and task.due_at:
             self.selected_date = task.due_at.date()
             self.refresh()
+            self._show_task(task_id)
 
     def _show_day(self, target_date: date) -> None:
         tasks = self.task_service.list_tasks_for_date(target_date)

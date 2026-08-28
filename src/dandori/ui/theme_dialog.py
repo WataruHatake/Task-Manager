@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
@@ -20,11 +21,32 @@ from dandori.ui.theme import COLOR_PALETTES, get_palette, normalize_appearance
 class ColorSwatch(QFrame):
     def __init__(self, color: str, parent=None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setFixedSize(32, 32)
         self.setStyleSheet(
             f"background-color: {color}; border: 1px solid rgba(128,128,128,0.35); "
             "border-radius: 16px;"
         )
+
+
+class PaletteRow(QFrame):
+    selected = Signal(str)
+
+    def __init__(self, palette_key: str, parent=None) -> None:
+        super().__init__(parent)
+        self.palette_key = palette_key
+        self.setObjectName("paletteRow")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def set_selected(self, selected: bool) -> None:
+        self.setProperty("selected", selected)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.selected.emit(self.palette_key)
+        super().mouseReleaseEvent(event)
 
 
 class ThemeDialog(QDialog):
@@ -33,7 +55,8 @@ class ThemeDialog(QDialog):
     def __init__(self, palette_key: str, appearance: str, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("カラーテーマ")
-        self.setMinimumSize(500, 620)
+        self.setMinimumSize(360, 420)
+        self.resize(500, 580)
         self.palette_key = get_palette(palette_key).key
         self.appearance = normalize_appearance(appearance)
 
@@ -60,9 +83,10 @@ class ThemeDialog(QDialog):
         palette_layout.setContentsMargins(0, 0, 0, 0)
         palette_layout.setSpacing(8)
         palette_group = QButtonGroup(self)
+        self.palette_rows: dict[str, PaletteRow] = {}
+        self.palette_radios: dict[str, QRadioButton] = {}
         for palette in COLOR_PALETTES:
-            row = QFrame()
-            row.setObjectName("paletteRow")
+            row = PaletteRow(palette.key)
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(14, 9, 14, 9)
             row_layout.setSpacing(10)
@@ -75,15 +99,22 @@ class ThemeDialog(QDialog):
                 lambda checked, key=palette.key: self._set_palette(key, checked)
             )
             palette_group.addButton(radio)
+            row.selected.connect(lambda key, target=radio: target.setChecked(True))
             row_layout.addSpacing(8)
             row_layout.addWidget(radio, 1)
             palette_layout.addWidget(row)
+            self.palette_rows[palette.key] = row
+            self.palette_radios[palette.key] = radio
+            row.set_selected(palette.key == self.palette_key)
         palette_layout.addStretch()
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidget(palette_widget)
+        QTimer.singleShot(
+            0, lambda: scroll.ensureWidgetVisible(self.palette_rows[self.palette_key])
+        )
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
@@ -105,6 +136,8 @@ class ThemeDialog(QDialog):
     def _set_palette(self, palette_key: str, checked: bool) -> None:
         if checked:
             self.palette_key = palette_key
+            for key, row in self.palette_rows.items():
+                row.set_selected(key == palette_key)
 
     def _set_appearance(self, appearance: str, checked: bool) -> None:
         if checked:

@@ -76,6 +76,40 @@ def test_create_update_and_complete_task(task_service):
     assert task_service.list_active_tasks() == []
 
 
+def test_task_views_and_restore(task_service):
+    today_task = task_service.create_task(
+        TaskInput(title="今日", due_date=date.today())
+    )
+    future_task = task_service.create_task(
+        TaskInput(title="今後", due_date=date.today() + timedelta(days=2))
+    )
+    overdue_task = task_service.create_task(
+        TaskInput(title="期限切れ", due_date=date.today() - timedelta(days=1))
+    )
+    completed_task = task_service.create_task(TaskInput(title="完了対象"))
+    task_service.complete_task(completed_task.id)
+
+    assert {task.id for task in task_service.list_tasks_for_view("today")} == {
+        today_task.id
+    }
+    assert {task.id for task in task_service.list_tasks_for_view("overdue")} == {
+        overdue_task.id
+    }
+    assert {task.id for task in task_service.list_tasks_for_view("all")} == {
+        today_task.id,
+        future_task.id,
+        overdue_task.id,
+    }
+    assert [task.id for task in task_service.list_tasks_for_view("completed")] == [
+        completed_task.id
+    ]
+
+    restored = task_service.restore_task(completed_task.id)
+
+    assert restored.status_enum is TaskStatus.TODO
+    assert task_service.list_tasks_for_view("completed") == []
+
+
 def test_list_tasks_for_selected_date(task_service):
     target = date.today() + timedelta(days=3)
     matching = task_service.create_task(TaskInput(title="対象タスク", due_date=target))

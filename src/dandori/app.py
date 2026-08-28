@@ -70,6 +70,7 @@ class DandoriRuntime:
         self.main_window.edge_tasks_requested.connect(self.show_edge_tasks)
         self.main_window.edge_add_requested.connect(self.show_edge_add)
         self.main_window.theme_requested.connect(self.show_theme_settings)
+        self.main_window.hidden_to_tray.connect(self._show_tray_hint)
         self.edge_tasks.tasks_changed.connect(self.main_window.refresh)
         self.edge_tasks.open_main_requested.connect(self.show_main)
         self.edge_tasks.open_add_requested.connect(self.show_edge_add)
@@ -102,8 +103,8 @@ class DandoriRuntime:
         self.tray_icon.setToolTip("タスク管理")
         menu = QMenu()
         menu.addAction("全表示", self.show_main)
-        menu.addAction("タスク追加", self.show_edge_add)
-        menu.addAction("タスク表示", self.show_edge_tasks)
+        menu.addAction("タスク追加    Ctrl+Alt+N", self.show_edge_add)
+        menu.addAction("タスク表示    Ctrl+Alt+T", self.show_edge_tasks)
         menu.addAction("カラーテーマ", self.show_theme_settings)
         menu.addSeparator()
         menu.addAction("完全終了", self.quit)
@@ -183,6 +184,19 @@ class DandoriRuntime:
                 QSystemTrayIcon.MessageIcon.Warning,
                 5000,
             )
+
+    def _show_tray_hint(self) -> None:
+        if self.tray_icon is None or self.task_service.get_setting(
+            "tray_hint_shown", False
+        ):
+            return
+        self.tray_icon.showMessage(
+            "通知領域で実行中",
+            "画面を閉じてもタスク管理は終了していません。チェックアイコンから再表示できます。",
+            QSystemTrayIcon.MessageIcon.Information,
+            6000,
+        )
+        self.task_service.set_setting("tray_hint_shown", True)
 
     def quit(self) -> None:
         self.main_window.hide_to_tray = False

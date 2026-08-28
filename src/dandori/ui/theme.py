@@ -109,7 +109,23 @@ QFrame#surface, QFrame#detailSurface, QFrame#edgeCard, QFrame#paletteRow {
     border: 1px solid $border;
     border-radius: 11px;
 }
+QFrame#undoBar {
+    background: $selection;
+    border: 1px solid $accent;
+    border-radius: 9px;
+}
+QPushButton#undoButton {
+    min-height: 26px;
+    padding: 0 7px;
+    background: transparent;
+    color: $text;
+    border-color: $border_strong;
+}
 QFrame#paletteRow { min-height: 66px; }
+QFrame#paletteRow[selected="true"] {
+    background: $selection;
+    border: 2px solid $accent;
+}
 QLabel#pageTitle { color: $text; font-size: 22px; font-weight: 700; }
 QLabel#sectionLabel { color: $accent; font-size: 10px; font-weight: 700; }
 QLabel#muted, QLabel#fieldLabel { color: $muted; }
@@ -189,6 +205,17 @@ QPushButton#calendarTask {
     font-size: 9px;
     font-weight: 700;
 }
+QPushButton#calendarMore {
+    min-height: 16px;
+    max-height: 18px;
+    padding: 0 2px;
+    border: 0;
+    background: transparent;
+    color: $muted;
+    text-align: left;
+    font-size: 9px;
+}
+QPushButton#calendarDay[outsideMonth="true"] { color: $disabled_text; }
 QFrame#calendarCell { background: $surface; border-right: 1px solid $border; border-bottom: 1px solid $border; }
 QFrame#calendarCellSelected { background: $selection; border: 1px solid $accent; }
 QLineEdit, QTextEdit, QComboBox, QDateEdit, QTimeEdit {

@@ -35,7 +35,8 @@ class CategoryManagerDialog(QDialog):
         self.task_service = task_service
         self.selected_category_id: str | None = None
         self.setWindowTitle("カテゴリ管理")
-        self.setMinimumSize(420, 430)
+        self.setMinimumSize(360, 380)
+        self.resize(440, 500)
 
         title = QLabel("カテゴリ管理")
         title.setObjectName("pageTitle")
