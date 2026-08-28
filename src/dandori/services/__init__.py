@@ -1,1 +1,1 @@
-"""Application services for DANDORI."""
+"""Task manager application services."""

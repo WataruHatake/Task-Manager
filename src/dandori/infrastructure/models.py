@@ -26,7 +26,7 @@ class Category(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
-    color: Mapped[str] = mapped_column(String(9), nullable=False, default="#86BC25")
+    color: Mapped[str] = mapped_column(String(9), nullable=False, default="#8E8E93")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=local_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=local_now, onupdate=local_now

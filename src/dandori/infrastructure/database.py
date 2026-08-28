@@ -41,7 +41,10 @@ class Database:
         with self.session() as session:
             existing = session.scalar(select(Category).where(Category.name == "未分類"))
             if existing is None:
-                session.add(Category(name="未分類", color="#86BC25"))
+                session.add(Category(name="未分類", color="#8E8E93"))
+                session.commit()
+            elif existing.color.upper() == "#86BC25":
+                existing.color = "#8E8E93"
                 session.commit()
 
     def session(self) -> Session:

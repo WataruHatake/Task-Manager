@@ -1,4 +1,4 @@
-"""Create the initial DANDORI schema.
+"""Create the initial task manager schema.
 
 Revision ID: 0001
 Revises:

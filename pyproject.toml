@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=80"]
+requires = ["setuptools>=80", "wheel>=0.45"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dandori-local"
-version = "0.2.0"
-description = "DANDORI - completely local personal task manager"
+name = "task-manager-local"
+version = "0.3.0"
+description = "Completely local personal task manager"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-dandori = "dandori.__main__:main"
+task-manager = "dandori.__main__:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

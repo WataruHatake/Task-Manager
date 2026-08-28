@@ -1,4 +1,4 @@
-# DANDORI
+# ローカルタスク管理アプリ
 
 Windows向けの、完全ローカルで動作するタスク管理アプリです。
 
@@ -16,7 +16,7 @@ Windows向けの、完全ローカルで動作するタスク管理アプリで�
 - 30分単位の期限時刻プルダウンと直接入力
 - Windowsログイン時の自動常駐と二重起動防止
 - デスクトップショートカット
-- ダーク/ライトテーマ
+- ダーク/ライト表示と11種類のカラーパレット
 - `D:\TaskManager\Data\tasks.db` へのローカル保存
 
 Windows通知、繰り返し、サブタスク、添付は今後追加予定です。
@@ -33,24 +33,42 @@ Windows通知、繰り返し、サブタスク、添付は今後追加予定で�
 ### 手順
 
 1. Gitでリポジトリを取得するか、ZIPをダウンロードして展開する。
-2. プロジェクトフォルダーを `D:\TaskManager\App\DANDORI` へ配置する。
+2. プロジェクトフォルダーを `D:\TaskManager\App\Task-Manager` へ配置する。
 3. `scripts\setup_windows.cmd` をダブルクリックする。
-4. `DANDORI setup completed.` と表示されるまで待つ。
+4. `Task manager setup completed.` と表示されるまで待つ。
 5. `scripts\run_windows.cmd` をダブルクリックする。
 
-仮想環境はアプリフォルダー内の `.venv` へ自動作成されます。DBはアプリ本体と分けて `D:\TaskManager\Data` へ保存されます。セットアップ時にデスクトップへ `DANDORI`、`DANDORI Add`、`DANDORI Tasks` のショートカットが作成されます。
+仮想環境はアプリフォルダー内の `.venv` へ自動作成されます。DBはアプリ本体と分けて `D:\TaskManager\Data` へ保存されます。セットアップ時にデスクトップへ `Task Manager`、`Task Add`、`Task List` のショートカットが作成されます。
 
 ## 普段の使い方
 
-DANDORIはWindowsログイン時に画面を出さず、通知領域へ常駐します。
+アプリはWindowsログイン時に画面を出さず、通知領域へ常駐します。
 
 - タスクを追加する: `Ctrl + Alt + N`
 - タスクを確認する: `Ctrl + Alt + T`
 - 同じショートカットをもう一度押す: 右端パネルを閉じる
-- 全表示を開く: デスクトップの `DANDORI`、または通知領域のDANDORIアイコン
-- 完全に終了する: 通知領域のDANDORIを右クリックし、「完全終了」
+- 全表示を開く: デスクトップの `Task Manager`、または通知領域のチェックアイコン
+- 完全に終了する: 通知領域のチェックアイコンを右クリックし、「完全終了」
 
 右端パネルの `×` や全表示画面の `×` ではアプリは終了せず、通知領域へ戻ります。
+
+## カラーテーマ
+
+全表示画面の左下、または通知領域メニューの「カラーテーマ」から変更します。ダーク／ライトと、次の11種類のパレットを自由に組み合わせられます。
+
+- デフォルト
+- Cocoa Dusk
+- Blue Horizon
+- Blush Harmony
+- Violet Dream
+- Cotton Bloom
+- Earthy Moss
+- Crystal Mist
+- Candy Pop
+- Midnight Linen
+- Rosy Overcast
+
+選択内容はDBへ保存され、次回起動時にも引き継がれます。画面上に固有のアプリ名や文字ロゴは表示しません。
 
 ## 起動できない場合
 

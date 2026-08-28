@@ -18,12 +18,12 @@ from PySide6.QtWidgets import (
 from dandori.services.task_service import TaskService
 
 COLOR_OPTIONS = (
-    ("ライム", "#86BC25"),
-    ("ブルー", "#4B8DFF"),
-    ("オレンジ", "#F5A623"),
-    ("レッド", "#E75A5A"),
-    ("パープル", "#9A6DFF"),
-    ("グレー", "#7D867D"),
+    ("グレー", "#8E8E93"),
+    ("ブルー", "#6B90B2"),
+    ("コーラル", "#ED6A5A"),
+    ("パープル", "#B076C8"),
+    ("ピンク", "#F2A0B4"),
+    ("モス", "#84AE92"),
 )
 
 

@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from dandori.domain.enums import ACTIVE_STATUSES, Priority, TaskStatus
 from dandori.infrastructure.database import Database
-from dandori.infrastructure.models import Category, Task, TaskHistory, local_now
+from dandori.infrastructure.models import Category, Setting, Task, TaskHistory, local_now
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,7 @@ class TaskService:
             raise RuntimeError("初期カテゴリがありません。")
         return categories[0]
 
-    def create_category(self, name: str, color: str = "#86BC25") -> Category:
+    def create_category(self, name: str, color: str = "#8E8E93") -> Category:
         normalized_name = self._validate_category(name, color)
         with self.database.session() as session:
             categories = list(session.scalars(select(Category)))
@@ -110,6 +110,27 @@ class TaskService:
         except ValueError as error:
             raise ValueError("カテゴリ色の形式が正しくありません。") from error
         return normalized_name
+
+    def get_setting(self, key: str, default=None):
+        with self.database.session() as session:
+            setting = session.get(Setting, key)
+            if setting is None:
+                return default
+            try:
+                return json.loads(setting.value_json)
+            except json.JSONDecodeError:
+                return default
+
+    def set_setting(self, key: str, value) -> None:
+        serialized = json.dumps(value, ensure_ascii=False)
+        with self.database.session() as session:
+            setting = session.get(Setting, key)
+            if setting is None:
+                session.add(Setting(key=key, value_json=serialized))
+            else:
+                setting.value_json = serialized
+                setting.updated_at = local_now()
+            session.commit()
 
     def list_active_tasks(self, search_text: str = "") -> list[Task]:
         with self.database.session() as session:

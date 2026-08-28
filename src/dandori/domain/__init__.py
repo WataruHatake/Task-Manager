@@ -1,1 +1,1 @@
-"""Domain types for DANDORI."""
+"""Task manager domain types."""

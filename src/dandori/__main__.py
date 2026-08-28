@@ -10,7 +10,7 @@ from dandori.infrastructure.config import resolve_app_paths
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="DANDORI local task manager")
+    parser = argparse.ArgumentParser(description="Local task manager")
     parser.add_argument("--data-dir", help="SQLiteと添付ファイルの保存先")
     parser.add_argument("--tray", action="store_true", help="画面を開かず通知領域で起動")
     parser.add_argument(
@@ -30,8 +30,8 @@ def main(argv: list[str] | None = None) -> int:
         print(str(error), file=sys.stderr)
         return 1
     application = QApplication(sys.argv[:1])
-    application.setApplicationName("DANDORI")
-    application.setOrganizationName("DANDORI")
+    application.setApplicationName("Task Manager")
+    application.setOrganizationName("TaskManager")
     application.setQuitOnLastWindowClosed(False)
     start_mode = "tray" if args.tray else args.mode
     return run(application, paths.data_dir, start_mode=start_mode)

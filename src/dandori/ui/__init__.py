@@ -1,1 +1,1 @@
-"""PySide6 user interface for DANDORI."""
+"""PySide6 task manager user interface."""

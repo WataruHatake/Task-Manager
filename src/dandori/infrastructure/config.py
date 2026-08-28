@@ -56,7 +56,9 @@ def resolve_app_paths(explicit_data_dir: str | Path | None = None) -> AppPaths:
     if explicit_data_dir:
         return AppPaths.from_data_dir(Path(explicit_data_dir))
 
-    environment_dir = os.environ.get("DANDORI_DATA_DIR")
+    environment_dir = os.environ.get("TASK_MANAGER_DATA_DIR") or os.environ.get(
+        "DANDORI_DATA_DIR"
+    )
     if environment_dir:
         return AppPaths.from_data_dir(Path(environment_dir))
 
@@ -67,7 +69,7 @@ def resolve_app_paths(explicit_data_dir: str | Path | None = None) -> AppPaths:
     if platform.system() == "Windows":
         if not Path("D:/").exists():
             raise RuntimeError(
-                "Dドライブを確認できません。DANDORIのデータ保存先を設定してください。"
+                "Dドライブを確認できません。タスクデータの保存先を設定してください。"
             )
         return AppPaths.from_data_dir(DEFAULT_WINDOWS_DATA_DIR)
 

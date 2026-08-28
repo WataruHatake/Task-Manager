@@ -12,9 +12,19 @@ from dandori.services.task_service import TaskInput
 
 def test_database_initializes_default_category(database):
     with database.session() as session:
-        category_names = list(session.scalars(select(Category.name)))
+        category = session.scalar(select(Category))
 
-    assert category_names == ["未分類"]
+    assert category is not None
+    assert category.name == "未分類"
+    assert category.color == "#8E8E93"
+
+
+def test_settings_are_saved_as_json(task_service):
+    expected = {"palette": "cotton-bloom", "appearance": "light"}
+
+    task_service.set_setting("theme", expected)
+
+    assert task_service.get_setting("theme", {}) == expected
 
 
 def test_create_task_with_date_only_uses_internal_1700(task_service, database):

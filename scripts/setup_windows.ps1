@@ -45,14 +45,15 @@ if (-not (Test-Path $virtualEnv)) {
 }
 
 $venvPython = Join-Path $virtualEnv "Scripts\python.exe"
-& $venvPython -m pip install --upgrade pip
+& $venvPython -m pip install --upgrade pip setuptools wheel
 if ($LASTEXITCODE -ne 0) {
-    throw "Failed to upgrade pip."
+    throw "Failed to prepare Python build tools."
 }
 & $venvPython -m pip install -e $projectRoot
 if ($LASTEXITCODE -ne 0) {
-    throw "Failed to install DANDORI dependencies."
+    throw "Failed to install task manager dependencies."
 }
+& $venvPython -m pip uninstall --yes dandori-local | Out-Null
 
 $fontDir = Join-Path $projectRoot "src\dandori\assets\fonts"
 $fontFile = Join-Path $fontDir "NotoSansJP-Variable.ttf"
@@ -64,7 +65,7 @@ if (-not (Test-Path $fontFile)) {
             -Uri "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf" `
             -OutFile $fontFile
     } catch {
-        Write-Warning "Noto Sans JP could not be downloaded. DANDORI will use a Windows system font."
+        Write-Warning "Noto Sans JP could not be downloaded. The app will use a Windows system font."
     }
 }
 
@@ -77,7 +78,7 @@ New-Item -ItemType Directory -Force -Path $bootstrapDir | Out-Null
 
 $venvPythonw = Join-Path $virtualEnv "Scripts\pythonw.exe"
 $shortcutShell = New-Object -ComObject WScript.Shell
-function New-DandoriShortcut {
+function New-TaskManagerShortcut {
     param(
         [string]$ShortcutPath,
         [string]$Mode
@@ -91,12 +92,24 @@ function New-DandoriShortcut {
 }
 
 $desktopDir = [Environment]::GetFolderPath("Desktop")
-New-DandoriShortcut (Join-Path $desktopDir "DANDORI.lnk") "full"
-New-DandoriShortcut (Join-Path $desktopDir "DANDORI Add.lnk") "add"
-New-DandoriShortcut (Join-Path $desktopDir "DANDORI Tasks.lnk") "tasks"
-
 $startupDir = [Environment]::GetFolderPath("Startup")
-New-DandoriShortcut (Join-Path $startupDir "DANDORI.lnk") "tray"
+$legacyShortcuts = @(
+    (Join-Path $desktopDir "DANDORI.lnk"),
+    (Join-Path $desktopDir "DANDORI Add.lnk"),
+    (Join-Path $desktopDir "DANDORI Tasks.lnk"),
+    (Join-Path $startupDir "DANDORI.lnk")
+)
+foreach ($legacyShortcut in $legacyShortcuts) {
+    if (Test-Path $legacyShortcut) {
+        Remove-Item -Force $legacyShortcut
+    }
+}
+
+New-TaskManagerShortcut (Join-Path $desktopDir "Task Manager.lnk") "full"
+New-TaskManagerShortcut (Join-Path $desktopDir "Task Add.lnk") "add"
+New-TaskManagerShortcut (Join-Path $desktopDir "Task List.lnk") "tasks"
+
+New-TaskManagerShortcut (Join-Path $startupDir "Task Manager.lnk") "tray"
 
 Start-Process `
     -FilePath $venvPythonw `
@@ -104,8 +117,8 @@ Start-Process `
     -WorkingDirectory $projectRoot
 
 Write-Host ""
-Write-Host "DANDORI setup completed." -ForegroundColor Green
+Write-Host "Task manager setup completed." -ForegroundColor Green
 Write-Host "Data directory: $dataRoot"
 Write-Host "Start command: scripts\run_windows.cmd"
 Write-Host "Desktop shortcuts and Windows startup registration were created."
-Write-Host "DANDORI is now running in the notification area."
+Write-Host "The task manager is now running in the notification area."

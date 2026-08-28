@@ -1,1 +1,1 @@
-"""Infrastructure adapters for DANDORI."""
+"""Task manager infrastructure adapters."""

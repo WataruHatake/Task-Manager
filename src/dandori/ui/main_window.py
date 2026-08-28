@@ -26,14 +26,13 @@ from dandori.ui.task_views import TaskTablePage
 class MainWindow(QMainWindow):
     edge_tasks_requested = Signal()
     edge_add_requested = Signal()
-    theme_requested = Signal(str)
+    theme_requested = Signal()
 
     def __init__(self, task_service: TaskService, parent=None) -> None:
         super().__init__(parent)
         self.task_service = task_service
-        self.current_theme = "dark"
         self.hide_to_tray = False
-        self.setWindowTitle("DANDORI")
+        self.setWindowTitle("タスク管理")
         self.resize(1160, 760)
         self.setMinimumSize(860, 600)
 
@@ -46,11 +45,8 @@ class MainWindow(QMainWindow):
 
         self.page_title = QLabel("タスク一覧")
         self.page_title.setObjectName("pageTitle")
-        section = QLabel("MY WORK")
-        section.setObjectName("sectionLabel")
         heading_layout = QVBoxLayout()
         heading_layout.setSpacing(1)
-        heading_layout.addWidget(section)
         heading_layout.addWidget(self.page_title)
 
         self.search_edit = QLineEdit()
@@ -109,9 +105,6 @@ class MainWindow(QMainWindow):
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(176)
-        logo = QLabel("DANDORI")
-        logo.setObjectName("logo")
-
         today = QPushButton("▣  今日")
         today.setObjectName("navButton")
         today.setCheckable(True)
@@ -128,21 +121,20 @@ class MainWindow(QMainWindow):
             button.setEnabled(False)
             button.setToolTip("第二段階で実装予定")
 
-        self.theme_button = QPushButton("ライトテーマ")
-        self.theme_button.clicked.connect(self._toggle_theme)
+        theme_button = QPushButton("カラーテーマ")
+        theme_button.clicked.connect(lambda: self.theme_requested.emit())
         category_button = QPushButton("カテゴリ管理")
         category_button.clicked.connect(self._manage_categories)
 
         layout = QVBoxLayout(sidebar)
         layout.setContentsMargins(13, 22, 13, 16)
         layout.setSpacing(4)
-        layout.addWidget(logo)
-        layout.addSpacing(22)
+        layout.addSpacing(8)
         for button in (today, all_tasks, overdue, completed, trash):
             layout.addWidget(button)
         layout.addStretch()
         layout.addWidget(category_button)
-        layout.addWidget(self.theme_button)
+        layout.addWidget(theme_button)
         return sidebar
 
     def _manage_categories(self) -> None:
@@ -178,13 +170,6 @@ class MainWindow(QMainWindow):
     def _complete_task(self, task_id: str) -> None:
         self.task_service.complete_task(task_id)
         self.refresh()
-
-    def _toggle_theme(self) -> None:
-        self.current_theme = "light" if self.current_theme == "dark" else "dark"
-        self.theme_button.setText(
-            "ダークテーマ" if self.current_theme == "light" else "ライトテーマ"
-        )
-        self.theme_requested.emit(self.current_theme)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.hide_to_tray:

@@ -22,7 +22,7 @@ class SingleInstanceCoordinator(QObject):
 
     def notify_existing(self, command: str, timeout_ms: int = 700) -> bool:
         if command not in VALID_COMMANDS:
-            raise ValueError(f"Unknown DANDORI command: {command}")
+            raise ValueError(f"Unknown task manager command: {command}")
         socket = QLocalSocket()
         socket.connectToServer(self.server_name)
         if not socket.waitForConnected(timeout_ms):

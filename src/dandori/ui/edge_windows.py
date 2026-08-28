@@ -93,7 +93,7 @@ class EdgeTaskWindow(EdgeWindowBase):
     def __init__(self, task_service: TaskService, parent=None) -> None:
         super().__init__(parent)
         self.task_service = task_service
-        self.setWindowTitle("DANDORI - タスク")
+        self.setWindowTitle("タスク")
 
         self.cards_widget = QWidget()
         self.cards_layout = QVBoxLayout(self.cards_widget)
@@ -196,7 +196,7 @@ class EdgeAddWindow(EdgeWindowBase):
     def __init__(self, task_service: TaskService, parent=None) -> None:
         super().__init__(parent)
         self.task_service = task_service
-        self.setWindowTitle("DANDORI - タスク追加")
+        self.setWindowTitle("タスク追加")
 
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText("タスク名")

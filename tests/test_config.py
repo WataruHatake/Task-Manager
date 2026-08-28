@@ -14,7 +14,7 @@ def test_app_paths_build_expected_structure(tmp_path):
 
 
 def test_explicit_data_dir_has_priority(tmp_path, monkeypatch):
-    monkeypatch.setenv("DANDORI_DATA_DIR", str(tmp_path / "environment"))
+    monkeypatch.setenv("TASK_MANAGER_DATA_DIR", str(tmp_path / "environment"))
 
     paths = resolve_app_paths(Path(tmp_path / "explicit"))
 
