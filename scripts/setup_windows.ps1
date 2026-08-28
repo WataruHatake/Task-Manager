@@ -98,8 +98,14 @@ New-DandoriShortcut (Join-Path $desktopDir "DANDORI Tasks.lnk") "tasks"
 $startupDir = [Environment]::GetFolderPath("Startup")
 New-DandoriShortcut (Join-Path $startupDir "DANDORI.lnk") "tray"
 
+Start-Process `
+    -FilePath $venvPythonw `
+    -ArgumentList "-m", "dandori", "--mode", "tray" `
+    -WorkingDirectory $projectRoot
+
 Write-Host ""
 Write-Host "DANDORI setup completed." -ForegroundColor Green
 Write-Host "Data directory: $dataRoot"
 Write-Host "Start command: scripts\run_windows.cmd"
 Write-Host "Desktop shortcuts and Windows startup registration were created."
+Write-Host "DANDORI is now running in the notification area."
