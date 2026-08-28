@@ -13,6 +13,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="DANDORI local task manager")
     parser.add_argument("--data-dir", help="SQLiteと添付ファイルの保存先")
     parser.add_argument("--tray", action="store_true", help="画面を開かず通知領域で起動")
+    parser.add_argument(
+        "--mode",
+        choices=("full", "tasks", "add", "tray"),
+        default="full",
+        help="起動時に開く画面",
+    )
     return parser
 
 
@@ -27,7 +33,8 @@ def main(argv: list[str] | None = None) -> int:
     application.setApplicationName("DANDORI")
     application.setOrganizationName("DANDORI")
     application.setQuitOnLastWindowClosed(False)
-    return run(application, paths.data_dir, start_in_tray=args.tray)
+    start_mode = "tray" if args.tray else args.mode
+    return run(application, paths.data_dir, start_mode=start_mode)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, time, timedelta
 
+import pytest
 from sqlalchemy import func, select
 
 from dandori.domain.enums import Priority, TaskStatus
@@ -81,3 +82,26 @@ def test_search_matches_title_and_memo(task_service):
 
     assert [task.title for task in task_service.list_active_tasks("交通費")] == ["経費精算"]
     assert [task.title for task in task_service.list_active_tasks("アジェンダ")] == ["アジェンダ"]
+
+
+def test_category_create_update_and_delete_reassigns_tasks(task_service):
+    category = task_service.create_category("プロジェクトA", "#4B8DFF")
+    task = task_service.create_task(TaskInput(title="カテゴリ確認", category_id=category.id))
+
+    updated = task_service.update_category(category.id, "プロジェクトB", "#F5A623")
+
+    assert updated.name == "プロジェクトB"
+    assert updated.color == "#F5A623"
+
+    task_service.delete_category(category.id)
+
+    reassigned = task_service.get_task(task.id)
+    assert reassigned is not None
+    assert reassigned.category.name == "未分類"
+
+
+def test_default_category_cannot_be_deleted(task_service):
+    default = task_service.default_category()
+
+    with pytest.raises(ValueError, match="削除できません"):
+        task_service.delete_category(default.id)

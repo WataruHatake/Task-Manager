@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from dandori.services.task_service import TaskService
 from dandori.ui.calendar_page import CalendarPage
+from dandori.ui.category_dialog import CategoryManagerDialog
 from dandori.ui.task_dialog import TaskDialog
 from dandori.ui.task_views import TaskTablePage
 
@@ -43,7 +44,7 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self.table_page)
         self.pages.addWidget(self.calendar_page)
 
-        self.page_title = QLabel("今日のタスク")
+        self.page_title = QLabel("タスク一覧")
         self.page_title.setObjectName("pageTitle")
         section = QLabel("MY WORK")
         section.setObjectName("sectionLabel")
@@ -71,17 +72,10 @@ class MainWindow(QMainWindow):
         add_button = QPushButton("＋ タスク追加")
         add_button.setObjectName("primaryButton")
         add_button.clicked.connect(self._create_task)
-        edge_tasks_button = QPushButton("右端タスク")
-        edge_tasks_button.clicked.connect(self.edge_tasks_requested)
-        edge_add_button = QPushButton("右端追加")
-        edge_add_button.clicked.connect(self.edge_add_requested)
-
         actions = QHBoxLayout()
         actions.setSpacing(7)
         actions.addWidget(self.list_button)
         actions.addWidget(self.calendar_button)
-        actions.addWidget(edge_tasks_button)
-        actions.addWidget(edge_add_button)
         actions.addWidget(add_button)
 
         header = QHBoxLayout()
@@ -136,6 +130,8 @@ class MainWindow(QMainWindow):
 
         self.theme_button = QPushButton("ライトテーマ")
         self.theme_button.clicked.connect(self._toggle_theme)
+        category_button = QPushButton("カテゴリ管理")
+        category_button.clicked.connect(self._manage_categories)
 
         layout = QVBoxLayout(sidebar)
         layout.setContentsMargins(13, 22, 13, 16)
@@ -145,8 +141,15 @@ class MainWindow(QMainWindow):
         for button in (today, all_tasks, overdue, completed, trash):
             layout.addWidget(button)
         layout.addStretch()
+        layout.addWidget(category_button)
         layout.addWidget(self.theme_button)
         return sidebar
+
+    def _manage_categories(self) -> None:
+        dialog = CategoryManagerDialog(self.task_service, self)
+        dialog.categories_changed.connect(self.refresh)
+        dialog.exec()
+        self.refresh()
 
     def refresh(self, preferred_task_id: str | None = None) -> None:
         tasks = self.task_service.list_active_tasks(self.search_edit.text())
@@ -155,7 +158,7 @@ class MainWindow(QMainWindow):
 
     def _change_view(self, view_id: int) -> None:
         self.pages.setCurrentIndex(view_id)
-        self.page_title.setText("今日のタスク" if view_id == 0 else "カレンダー")
+        self.page_title.setText("タスク一覧" if view_id == 0 else "カレンダー")
         self.search_edit.setVisible(view_id == 0)
 
     def _create_task(self) -> None:

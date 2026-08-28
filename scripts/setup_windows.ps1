@@ -75,7 +75,31 @@ New-Item -ItemType Directory -Force -Path $bootstrapDir | Out-Null
     ConvertTo-Json |
     Set-Content -Encoding UTF8 $bootstrapFile
 
+$venvPythonw = Join-Path $virtualEnv "Scripts\pythonw.exe"
+$shortcutShell = New-Object -ComObject WScript.Shell
+function New-DandoriShortcut {
+    param(
+        [string]$ShortcutPath,
+        [string]$Mode
+    )
+    $shortcut = $shortcutShell.CreateShortcut($ShortcutPath)
+    $shortcut.TargetPath = $venvPythonw
+    $shortcut.Arguments = "-m dandori --mode $Mode"
+    $shortcut.WorkingDirectory = $projectRoot
+    $shortcut.IconLocation = "$venvPythonw,0"
+    $shortcut.Save()
+}
+
+$desktopDir = [Environment]::GetFolderPath("Desktop")
+New-DandoriShortcut (Join-Path $desktopDir "DANDORI.lnk") "full"
+New-DandoriShortcut (Join-Path $desktopDir "DANDORI Add.lnk") "add"
+New-DandoriShortcut (Join-Path $desktopDir "DANDORI Tasks.lnk") "tasks"
+
+$startupDir = [Environment]::GetFolderPath("Startup")
+New-DandoriShortcut (Join-Path $startupDir "DANDORI.lnk") "tray"
+
 Write-Host ""
 Write-Host "DANDORI setup completed." -ForegroundColor Green
 Write-Host "Data directory: $dataRoot"
 Write-Host "Start command: scripts\run_windows.cmd"
+Write-Host "Desktop shortcuts and Windows startup registration were created."

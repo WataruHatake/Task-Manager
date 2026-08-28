@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime, time
 
-from sqlalchemy import Select, or_, select
+from sqlalchemy import Select, or_, select, update
 from sqlalchemy.orm import selectinload
 
 from dandori.domain.enums import ACTIVE_STATUSES, Priority, TaskStatus
@@ -47,6 +47,69 @@ class TaskService:
         if not categories:
             raise RuntimeError("初期カテゴリがありません。")
         return categories[0]
+
+    def create_category(self, name: str, color: str = "#86BC25") -> Category:
+        normalized_name = self._validate_category(name, color)
+        with self.database.session() as session:
+            categories = list(session.scalars(select(Category)))
+            if any(category.name.casefold() == normalized_name.casefold() for category in categories):
+                raise ValueError("同じ名前のカテゴリが既にあります。")
+            category = Category(name=normalized_name, color=color.upper())
+            session.add(category)
+            session.commit()
+            session.refresh(category)
+            return category
+
+    def update_category(self, category_id: str, name: str, color: str) -> Category:
+        normalized_name = self._validate_category(name, color)
+        with self.database.session() as session:
+            category = session.get(Category, category_id)
+            if category is None:
+                raise LookupError("カテゴリが見つかりません。")
+            if category.name == "未分類" and normalized_name != "未分類":
+                raise ValueError("「未分類」の名称は変更できません。")
+            categories = list(session.scalars(select(Category).where(Category.id != category_id)))
+            if any(item.name.casefold() == normalized_name.casefold() for item in categories):
+                raise ValueError("同じ名前のカテゴリが既にあります。")
+            category.name = normalized_name
+            category.color = color.upper()
+            category.updated_at = local_now()
+            session.commit()
+            session.refresh(category)
+            return category
+
+    def delete_category(self, category_id: str) -> None:
+        with self.database.session() as session:
+            category = session.get(Category, category_id)
+            if category is None:
+                raise LookupError("カテゴリが見つかりません。")
+            if category.name == "未分類":
+                raise ValueError("「未分類」は削除できません。")
+            default = session.scalar(select(Category).where(Category.name == "未分類"))
+            if default is None:
+                raise RuntimeError("初期カテゴリがありません。")
+            session.execute(
+                update(Task)
+                .where(Task.category_id == category.id)
+                .values(category_id=default.id, updated_at=local_now())
+            )
+            session.delete(category)
+            session.commit()
+
+    @staticmethod
+    def _validate_category(name: str, color: str) -> str:
+        normalized_name = name.strip()
+        if not normalized_name:
+            raise ValueError("カテゴリ名を入力してください。")
+        if len(normalized_name) > 80:
+            raise ValueError("カテゴリ名は80文字以内で入力してください。")
+        if len(color) != 7 or not color.startswith("#"):
+            raise ValueError("カテゴリ色の形式が正しくありません。")
+        try:
+            int(color[1:], 16)
+        except ValueError as error:
+            raise ValueError("カテゴリ色の形式が正しくありません。") from error
+        return normalized_name
 
     def list_active_tasks(self, search_text: str = "") -> list[Task]:
         with self.database.session() as session:

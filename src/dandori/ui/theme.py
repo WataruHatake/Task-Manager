@@ -28,6 +28,7 @@ QWidget {
 }
 QLabel { background: transparent; }
 QMainWindow, QDialog { background: #0B0D0C; }
+QDialog#edgeWindow { border-left: 1px solid #363C36; }
 QFrame#sidebar { background: #101310; border-right: 1px solid #2A2F2A; }
 QFrame#surface, QFrame#detailSurface, QFrame#edgeCard {
     background: #151815;
@@ -40,6 +41,8 @@ QLabel#sectionLabel { color: #86BC25; font-size: 10px; font-weight: 700; }
 QLabel#muted, QLabel#fieldLabel { color: #8F968F; }
 QLabel#fieldLabel { font-size: 10px; font-weight: 700; }
 QLabel#detailTitle { font-size: 17px; font-weight: 700; }
+QLabel#edgeTitle { font-size: 15px; font-weight: 700; }
+QLabel#edgeTaskTitle { font-size: 11px; font-weight: 700; }
 QPushButton {
     min-height: 32px;
     padding: 0 11px;
@@ -58,6 +61,19 @@ QPushButton#primaryButton {
     font-weight: 700;
 }
 QPushButton#dangerButton { color: #FF7474; }
+QPushButton#compactButton, QPushButton#edgeClose {
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 0;
+}
+QPushButton#edgeClose { border: 0; background: transparent; font-size: 18px; }
+QPushButton#edgeNav, QPushButton#edgeAction {
+    min-height: 28px;
+    padding: 0 5px;
+    font-size: 10px;
+}
 QPushButton#navButton {
     border: 0;
     background: transparent;
@@ -146,6 +162,7 @@ QWidget {
 }
 QLabel { background: transparent; }
 QMainWindow, QDialog { background: #EEF0EC; }
+QDialog#edgeWindow { border-left: 1px solid #C8CEC5; }
 QFrame#sidebar { background: #F8F9F6; border-right: 1px solid #D4D9D2; }
 QFrame#surface, QFrame#detailSurface, QFrame#edgeCard {
     background: #FFFFFF;
@@ -158,6 +175,8 @@ QLabel#sectionLabel { color: #527F08; font-size: 10px; font-weight: 700; }
 QLabel#muted, QLabel#fieldLabel { color: #687068; }
 QLabel#fieldLabel { font-size: 10px; font-weight: 700; }
 QLabel#detailTitle { color: #111411; font-size: 17px; font-weight: 700; }
+QLabel#edgeTitle { color: #111411; font-size: 15px; font-weight: 700; }
+QLabel#edgeTaskTitle { color: #111411; font-size: 11px; font-weight: 700; }
 QPushButton {
     min-height: 32px;
     padding: 0 11px;
@@ -170,6 +189,9 @@ QPushButton {
 QPushButton:hover { background: #F1F4EE; }
 QPushButton#primaryButton { background: #86BC25; color: #0B0D0B; border-color: #75A61E; font-weight: 700; }
 QPushButton#dangerButton { color: #C73737; }
+QPushButton#compactButton, QPushButton#edgeClose { min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px; padding: 0; }
+QPushButton#edgeClose { border: 0; background: transparent; font-size: 18px; }
+QPushButton#edgeNav, QPushButton#edgeAction { min-height: 28px; padding: 0 5px; font-size: 10px; }
 QPushButton#navButton { border: 0; background: transparent; color: #505850; text-align: left; padding-left: 12px; }
 QPushButton#navButton:checked { color: #171A17; background: #E7EDE2; border-left: 3px solid #86BC25; }
 QPushButton#viewButton:checked { background: #86BC25; color: #0B0D0B; border-color: #75A61E; }

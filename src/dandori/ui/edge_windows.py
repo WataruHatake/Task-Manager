@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, time
 
-from PySide6.QtCore import QDate, Qt, QTime, Signal
+from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtGui import QCloseEvent, QCursor
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
-    QTimeEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -25,8 +24,10 @@ from PySide6.QtWidgets import (
 from dandori.domain.enums import Priority
 from dandori.infrastructure.models import Task
 from dandori.services.task_service import TaskInput, TaskService
+from dandori.ui.category_dialog import CategoryManagerDialog
 from dandori.ui.task_dialog import TaskDialog
 from dandori.ui.task_views import format_due
+from dandori.ui.time_combo import TimeComboBox
 
 
 class EdgeWindowBase(QDialog):
@@ -34,20 +35,44 @@ class EdgeWindowBase(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowFlag(Qt.WindowType.Tool, True)
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, False)
-        self.setMinimumWidth(160)
-        self.setMaximumWidth(320)
+        self.setObjectName("edgeWindow")
+        self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+        self.setFixedWidth(self.BASE_WIDTH)
         self.resize(self.BASE_WIDTH, 600)
 
     def show_at_screen_edge(self) -> None:
         screen = self._screen_at_cursor()
         geometry = screen.availableGeometry()
-        width = max(self.minimumWidth(), min(self.width(), self.maximumWidth()))
-        self.setGeometry(geometry.right() - width + 1, geometry.top(), width, geometry.height())
+        self.setGeometry(
+            geometry.right() - self.BASE_WIDTH + 1,
+            geometry.top(),
+            self.BASE_WIDTH,
+            geometry.height(),
+        )
         self.show()
         self.raise_()
         self.activateWindow()
+
+    def make_header(self, title_text: str) -> QHBoxLayout:
+        title = QLabel(title_text)
+        title.setObjectName("edgeTitle")
+        title.setWordWrap(True)
+        close_button = QPushButton("×")
+        close_button.setObjectName("edgeClose")
+        close_button.setToolTip("閉じる")
+        close_button.clicked.connect(self.hide)
+        header = QHBoxLayout()
+        header.setSpacing(5)
+        header.addWidget(title, 1)
+        header.addWidget(close_button)
+        return header
+
+    @staticmethod
+    def make_nav_button(text: str) -> QPushButton:
+        button = QPushButton(text)
+        button.setObjectName("edgeNav")
+        return button
 
     @staticmethod
     def _screen_at_cursor():
@@ -56,27 +81,19 @@ class EdgeWindowBase(QDialog):
         return QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        event.accept()
+        event.ignore()
+        self.hide()
 
 
 class EdgeTaskWindow(EdgeWindowBase):
     tasks_changed = Signal()
     open_main_requested = Signal()
+    open_add_requested = Signal()
 
     def __init__(self, task_service: TaskService, parent=None) -> None:
         super().__init__(parent)
         self.task_service = task_service
         self.setWindowTitle("DANDORI - タスク")
-
-        title = QLabel("今日と次のタスク")
-        title.setObjectName("detailTitle")
-        title.setWordWrap(True)
-        close_button = QPushButton("×")
-        close_button.setFixedSize(30, 30)
-        close_button.clicked.connect(self.close)
-        header = QHBoxLayout()
-        header.addWidget(title, 1)
-        header.addWidget(close_button)
 
         self.cards_widget = QWidget()
         self.cards_layout = QVBoxLayout(self.cards_widget)
@@ -86,18 +103,25 @@ class EdgeTaskWindow(EdgeWindowBase):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(self.cards_widget)
 
-        open_main = QPushButton("全表示を開く")
-        open_main.setObjectName("primaryButton")
+        add_button = self.make_nav_button("＋ 追加")
+        add_button.setObjectName("primaryButton")
+        add_button.clicked.connect(self.open_add_requested)
+        open_main = self.make_nav_button("全表示")
         open_main.clicked.connect(self.open_main_requested)
+        navigation = QHBoxLayout()
+        navigation.setSpacing(5)
+        navigation.addWidget(add_button)
+        navigation.addWidget(open_main)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(9, 12, 9, 12)
-        layout.setSpacing(10)
-        layout.addLayout(header)
+        layout.setContentsMargins(9, 10, 9, 10)
+        layout.setSpacing(9)
+        layout.addLayout(self.make_header("タスク"))
         layout.addWidget(scroll, 1)
-        layout.addWidget(open_main)
+        layout.addLayout(navigation)
 
     def refresh(self) -> None:
         while self.cards_layout.count() > 1:
@@ -120,14 +144,16 @@ class EdgeTaskWindow(EdgeWindowBase):
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         title = QLabel(task.title)
+        title.setObjectName("edgeTaskTitle")
         title.setWordWrap(True)
-        title.setStyleSheet("font-weight: 700;")
         meta = QLabel(f"{format_due(task)}\n{task.priority_enum.label} ・ {task.status_enum.label}")
         meta.setObjectName("muted")
         meta.setWordWrap(True)
 
         complete = QPushButton("完了")
+        complete.setObjectName("edgeAction")
         edit = QPushButton("編集")
+        edit.setObjectName("edgeAction")
         complete.clicked.connect(lambda _checked=False, task_id=task.id: self._complete(task_id))
         edit.clicked.connect(lambda _checked=False, task_id=task.id: self._edit(task_id))
         actions = QHBoxLayout()
@@ -164,20 +190,13 @@ class EdgeTaskWindow(EdgeWindowBase):
 
 class EdgeAddWindow(EdgeWindowBase):
     task_created = Signal(str)
+    open_main_requested = Signal()
+    open_tasks_requested = Signal()
 
     def __init__(self, task_service: TaskService, parent=None) -> None:
         super().__init__(parent)
         self.task_service = task_service
         self.setWindowTitle("DANDORI - タスク追加")
-
-        title = QLabel("タスクを追加")
-        title.setObjectName("detailTitle")
-        close_button = QPushButton("×")
-        close_button.setFixedSize(30, 30)
-        close_button.clicked.connect(self.close)
-        header = QHBoxLayout()
-        header.addWidget(title, 1)
-        header.addWidget(close_button)
 
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText("タスク名")
@@ -185,57 +204,107 @@ class EdgeAddWindow(EdgeWindowBase):
         self.due_date = QDateEdit(QDate.currentDate())
         self.due_date.setCalendarPopup(True)
         self.due_date.setDisplayFormat("yyyy/MM/dd")
-        self.due_time = QTimeEdit(QTime(17, 0))
-        self.due_time.setDisplayFormat("HH:mm")
+        self.due_time = TimeComboBox(include_no_time=True)
+        self.due_time.set_time(time(17, 0))
         self.priority = QComboBox()
         for priority in Priority:
             self.priority.addItem(priority.label, priority)
         self.priority.setCurrentIndex(int(Priority.NORMAL) - 1)
         self.category = QComboBox()
         self._load_categories()
+        category_manage = QPushButton("…")
+        category_manage.setObjectName("compactButton")
+        category_manage.setToolTip("カテゴリ管理")
+        category_manage.clicked.connect(self._manage_categories)
+        category_row = QHBoxLayout()
+        category_row.setSpacing(4)
+        category_row.addWidget(self.category, 1)
+        category_row.addWidget(category_manage)
+
+        form_widget = QWidget()
+        form = QVBoxLayout(form_widget)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(6)
+        form.addWidget(self._field_label("タスク名"))
+        form.addWidget(self.title_edit)
+        form.addWidget(self.due_enabled)
+        form.addWidget(self._field_label("期限日"))
+        form.addWidget(self.due_date)
+        form.addWidget(self._field_label("期限時刻"))
+        form.addWidget(self.due_time)
+        form.addWidget(self._field_label("重要度"))
+        form.addWidget(self.priority)
+        form.addWidget(self._field_label("カテゴリ"))
+        form.addLayout(category_row)
+        form.addStretch()
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(form_widget)
 
         add_button = QPushButton("タスクを追加")
         add_button.setObjectName("primaryButton")
         add_button.clicked.connect(self._create)
         details_button = QPushButton("詳細入力")
+        details_button.setObjectName("edgeNav")
         details_button.clicked.connect(self._open_full_dialog)
 
+        tasks_button = self.make_nav_button("タスク")
+        tasks_button.clicked.connect(self.open_tasks_requested)
+        main_button = self.make_nav_button("全表示")
+        main_button.clicked.connect(self.open_main_requested)
+        navigation = QHBoxLayout()
+        navigation.setSpacing(5)
+        navigation.addWidget(tasks_button)
+        navigation.addWidget(main_button)
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(9, 12, 9, 12)
+        layout.setContentsMargins(9, 10, 9, 10)
         layout.setSpacing(8)
-        layout.addLayout(header)
-        layout.addWidget(QLabel("タスク名"))
-        layout.addWidget(self.title_edit)
-        layout.addWidget(self.due_enabled)
-        layout.addWidget(self.due_date)
-        layout.addWidget(self.due_time)
-        layout.addWidget(QLabel("重要度"))
-        layout.addWidget(self.priority)
-        layout.addWidget(QLabel("カテゴリ"))
-        layout.addWidget(self.category)
-        layout.addStretch()
+        layout.addLayout(self.make_header("タスク追加"))
+        layout.addWidget(scroll, 1)
         layout.addWidget(details_button)
         layout.addWidget(add_button)
+        layout.addLayout(navigation)
         self.due_enabled.toggled.connect(self._sync_due)
         self._sync_due()
 
-    def _load_categories(self) -> None:
+    @staticmethod
+    def _field_label(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("fieldLabel")
+        return label
+
+    def _load_categories(self, preferred_id: str | None = None) -> None:
+        preferred_id = preferred_id or self.category.currentData()
         self.category.clear()
         for category in self.task_service.list_categories():
             self.category.addItem(category.name, category.id)
+        index = self.category.findData(preferred_id)
+        if index >= 0:
+            self.category.setCurrentIndex(index)
+
+    def _manage_categories(self) -> None:
+        preferred_id = self.category.currentData()
+        dialog = CategoryManagerDialog(self.task_service, self)
+        dialog.categories_changed.connect(lambda: self._load_categories(preferred_id))
+        dialog.exec()
+        self._load_categories(preferred_id)
 
     def _sync_due(self) -> None:
-        self.due_date.setEnabled(self.due_enabled.isChecked())
-        self.due_time.setEnabled(self.due_enabled.isChecked())
+        enabled = self.due_enabled.isChecked()
+        self.due_date.setEnabled(enabled)
+        self.due_time.setEnabled(enabled)
 
     def _create(self) -> None:
         selected_date = self.due_date.date()
-        selected_time = self.due_time.time()
         due_date_value = None
         due_time_value = None
         if self.due_enabled.isChecked():
             due_date_value = date(selected_date.year(), selected_date.month(), selected_date.day())
-            due_time_value = time(selected_time.hour(), selected_time.minute())
+            due_time_value = self.due_time.time_value()
         try:
             task = self.task_service.create_task(
                 TaskInput(
@@ -251,13 +320,13 @@ class EdgeAddWindow(EdgeWindowBase):
             return
         self.title_edit.clear()
         self.task_created.emit(task.id)
-        self.close()
+        self.hide()
 
     def _open_full_dialog(self) -> None:
         dialog = TaskDialog(self.task_service, parent=self)
         if dialog.exec() and dialog.saved_task:
             self.task_created.emit(dialog.saved_task.id)
-            self.close()
+            self.hide()
 
     def show_at_screen_edge(self) -> None:
         self._load_categories()

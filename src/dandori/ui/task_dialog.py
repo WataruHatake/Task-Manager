@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, time
 
-from PySide6.QtCore import QDate, QTime
+from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -10,17 +10,21 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPushButton,
     QTextEdit,
-    QTimeEdit,
     QVBoxLayout,
+    QWidget,
 )
 
 from dandori.domain.enums import Priority, TaskStatus
 from dandori.infrastructure.models import Task
 from dandori.services.task_service import TaskInput, TaskService
+from dandori.ui.category_dialog import CategoryManagerDialog
+from dandori.ui.time_combo import TimeComboBox
 
 
 class TaskDialog(QDialog):
@@ -56,8 +60,16 @@ class TaskDialog(QDialog):
             self.priority_combo.addItem(priority.label, priority)
 
         self.category_combo = QComboBox()
-        for category in self.task_service.list_categories():
-            self.category_combo.addItem(category.name, category.id)
+        self._reload_categories()
+        category_manage_button = QPushButton("管理")
+        category_manage_button.setObjectName("compactButton")
+        category_manage_button.clicked.connect(self._manage_categories)
+        category_row = QWidget()
+        category_layout = QHBoxLayout(category_row)
+        category_layout.setContentsMargins(0, 0, 0, 0)
+        category_layout.setSpacing(6)
+        category_layout.addWidget(self.category_combo, 1)
+        category_layout.addWidget(category_manage_button)
 
         self.due_enabled = QCheckBox("期限を設定")
         self.due_date_edit = QDateEdit()
@@ -66,9 +78,8 @@ class TaskDialog(QDialog):
         base_date = initial_date or date.today()
         self.due_date_edit.setDate(QDate(base_date.year, base_date.month, base_date.day))
         self.due_time_enabled = QCheckBox("時刻を指定")
-        self.due_time_edit = QTimeEdit()
-        self.due_time_edit.setDisplayFormat("HH:mm")
-        self.due_time_edit.setTime(QTime(17, 0))
+        self.due_time_edit = TimeComboBox()
+        self.due_time_edit.set_time(time(17, 0))
 
         form = QFormLayout()
         form.setSpacing(10)
@@ -76,7 +87,7 @@ class TaskDialog(QDialog):
         form.addRow("メモ", self.memo_edit)
         form.addRow("状態", self.status_combo)
         form.addRow("重要度", self.priority_combo)
-        form.addRow("カテゴリ", self.category_combo)
+        form.addRow("カテゴリ", category_row)
         form.addRow("", self.due_enabled)
         form.addRow("期限日", self.due_date_edit)
         form.addRow("", self.due_time_enabled)
@@ -118,7 +129,23 @@ class TaskDialog(QDialog):
             self.due_enabled.setChecked(True)
             self.due_date_edit.setDate(QDate(task.due_at.year, task.due_at.month, task.due_at.day))
             self.due_time_enabled.setChecked(task.due_has_time)
-            self.due_time_edit.setTime(QTime(task.due_at.hour, task.due_at.minute))
+            self.due_time_edit.set_time(time(task.due_at.hour, task.due_at.minute))
+
+    def _reload_categories(self, preferred_id: str | None = None) -> None:
+        preferred_id = preferred_id or self.category_combo.currentData()
+        self.category_combo.clear()
+        for category in self.task_service.list_categories():
+            self.category_combo.addItem(category.name, category.id)
+        index = self.category_combo.findData(preferred_id)
+        if index >= 0:
+            self.category_combo.setCurrentIndex(index)
+
+    def _manage_categories(self) -> None:
+        preferred_id = self.category_combo.currentData()
+        dialog = CategoryManagerDialog(self.task_service, self)
+        dialog.categories_changed.connect(lambda: self._reload_categories(preferred_id))
+        dialog.exec()
+        self._reload_categories(preferred_id)
 
     def _sync_due_controls(self) -> None:
         enabled = self.due_enabled.isChecked()
@@ -133,8 +160,7 @@ class TaskDialog(QDialog):
             selected_date = self.due_date_edit.date()
             due_date_value = date(selected_date.year(), selected_date.month(), selected_date.day())
             if self.due_time_enabled.isChecked():
-                selected_time = self.due_time_edit.time()
-                due_time_value = time(selected_time.hour(), selected_time.minute())
+                due_time_value = self.due_time_edit.time_value()
         return TaskInput(
             title=self.title_edit.text(),
             memo=self.memo_edit.toPlainText(),
