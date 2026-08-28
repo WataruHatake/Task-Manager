@@ -4,9 +4,8 @@ $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $python = Join-Path $projectRoot ".venv\Scripts\python.exe"
 
 if (-not (Test-Path $python)) {
-    throw "仮想環境がありません。先にscripts\setup_windows.cmdを実行してください。"
+    throw "Virtual environment was not found. Run scripts\setup_windows.cmd first."
 }
 
 Set-Location $projectRoot
 & $python -m dandori
-

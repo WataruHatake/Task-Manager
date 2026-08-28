@@ -5,7 +5,7 @@ $dataRoot = "D:\TaskManager\Data"
 $virtualEnv = Join-Path $projectRoot ".venv"
 
 if (-not (Test-Path "D:\")) {
-    throw "Dドライブを確認できません。Dドライブが利用可能か確認してください。"
+    throw "D drive was not found. Make sure the D drive is available."
 }
 
 $pythonCommand = $null
@@ -14,7 +14,7 @@ if (Get-Command py -ErrorAction SilentlyContinue) {
 } elseif (Get-Command python -ErrorAction SilentlyContinue) {
     $pythonCommand = @("python")
 } else {
-    throw "Python 3.12.2を確認できません。"
+    throw "Python 3.12 was not found."
 }
 
 $version = if ($pythonCommand.Count -eq 2) {
@@ -23,10 +23,10 @@ $version = if ($pythonCommand.Count -eq 2) {
     & $pythonCommand[0] --version
 }
 if ($LASTEXITCODE -ne 0) {
-    throw "Python 3.12の起動に失敗しました。"
+    throw "Failed to start Python 3.12."
 }
 if ($version -notmatch "Python 3\.12\.") {
-    throw "Python 3.12が必要です。検出結果: $version"
+    throw "Python 3.12 is required. Detected: $version"
 }
 
 New-Item -ItemType Directory -Force -Path $dataRoot | Out-Null
@@ -40,18 +40,18 @@ if (-not (Test-Path $virtualEnv)) {
         & $pythonCommand[0] -m venv $virtualEnv
     }
     if ($LASTEXITCODE -ne 0) {
-        throw "Python仮想環境の作成に失敗しました。"
+        throw "Failed to create the Python virtual environment."
     }
 }
 
 $venvPython = Join-Path $virtualEnv "Scripts\python.exe"
 & $venvPython -m pip install --upgrade pip
 if ($LASTEXITCODE -ne 0) {
-    throw "pipの更新に失敗しました。"
+    throw "Failed to upgrade pip."
 }
 & $venvPython -m pip install -e $projectRoot
 if ($LASTEXITCODE -ne 0) {
-    throw "DANDORIの必要ライブラリ導入に失敗しました。"
+    throw "Failed to install DANDORI dependencies."
 }
 
 $fontDir = Join-Path $projectRoot "src\dandori\assets\fonts"
@@ -64,7 +64,7 @@ if (-not (Test-Path $fontFile)) {
             -Uri "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf" `
             -OutFile $fontFile
     } catch {
-        Write-Warning "Noto Sans JPを取得できませんでした。Windows標準フォントで起動します。"
+        Write-Warning "Noto Sans JP could not be downloaded. DANDORI will use a Windows system font."
     }
 }
 
@@ -76,6 +76,6 @@ New-Item -ItemType Directory -Force -Path $bootstrapDir | Out-Null
     Set-Content -Encoding UTF8 $bootstrapFile
 
 Write-Host ""
-Write-Host "DANDORIのセットアップが完了しました。" -ForegroundColor Green
-Write-Host "データ保存先: $dataRoot"
-Write-Host "起動: scripts\run_windows.cmd"
+Write-Host "DANDORI setup completed." -ForegroundColor Green
+Write-Host "Data directory: $dataRoot"
+Write-Host "Start command: scripts\run_windows.cmd"
