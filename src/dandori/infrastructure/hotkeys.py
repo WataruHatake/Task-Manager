@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, Signal
 class GlobalHotkeyService(QObject):
     add_requested = Signal()
     tasks_requested = Signal()
+    fallback_registered = Signal(str, str)
     registration_failed = Signal(str)
 
     HOTKEY_ADD_ID = 0xD101
@@ -53,16 +54,28 @@ class GlobalHotkeyService(QObject):
         self._thread_id = kernel32.GetCurrentThreadId()
 
         modifiers = 0x0001 | 0x0002 | 0x4000  # ALT | CONTROL | NOREPEAT
-        registrations = (
-            (self.HOTKEY_ADD_ID, ord("N"), "Ctrl + Alt + N"),
-            (self.HOTKEY_TASKS_ID, ord("T"), "Ctrl + Alt + T"),
-        )
         registered_ids: list[int] = []
-        for hotkey_id, virtual_key, label in registrations:
-            if user32.RegisterHotKey(None, hotkey_id, modifiers, virtual_key):
-                registered_ids.append(hotkey_id)
-            else:
-                self.registration_failed.emit(label)
+
+        primary_add = "Ctrl + Alt + N"
+        fallback_add = "Ctrl + Alt + A"
+        if user32.RegisterHotKey(
+            None, self.HOTKEY_ADD_ID, modifiers, ord("N")
+        ):
+            registered_ids.append(self.HOTKEY_ADD_ID)
+        elif user32.RegisterHotKey(
+            None, self.HOTKEY_ADD_ID, modifiers, ord("A")
+        ):
+            registered_ids.append(self.HOTKEY_ADD_ID)
+            self.fallback_registered.emit(primary_add, fallback_add)
+        else:
+            self.registration_failed.emit(f"{primary_add} / {fallback_add}")
+
+        if user32.RegisterHotKey(
+            None, self.HOTKEY_TASKS_ID, modifiers, ord("T")
+        ):
+            registered_ids.append(self.HOTKEY_TASKS_ID)
+        else:
+            self.registration_failed.emit("Ctrl + Alt + T")
 
         self._registered_count = len(registered_ids)
         self._ready.set()

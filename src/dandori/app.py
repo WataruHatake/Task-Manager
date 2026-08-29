@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtCore import QObject, Qt, Slot
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from dandori.infrastructure.config import AppPaths
@@ -39,13 +39,14 @@ def make_app_icon(accent: str, foreground: str) -> QIcon:
     return QIcon(pixmap)
 
 
-class DandoriRuntime:
+class DandoriRuntime(QObject):
     def __init__(
         self,
         application: QApplication,
         paths: AppPaths,
         single_instance: SingleInstanceCoordinator,
     ) -> None:
+        super().__init__(application)
         self.application = application
         load_bundled_fonts()
         self.paths = paths
@@ -64,6 +65,7 @@ class DandoriRuntime:
         self.edge_tasks = EdgeTaskWindow(self.task_service)
         self.edge_add = EdgeAddWindow(self.task_service)
         self.tray_icon: QSystemTrayIcon | None = None
+        self.tray_add_action: QAction | None = None
 
         icon = self._update_icons()
 
@@ -81,8 +83,10 @@ class DandoriRuntime:
         self.hotkeys = GlobalHotkeyService(self.application)
         self.hotkeys.add_requested.connect(self.toggle_edge_add)
         self.hotkeys.tasks_requested.connect(self.toggle_edge_tasks)
+        self.hotkeys.fallback_registered.connect(self._show_hotkey_fallback)
         self.hotkeys.registration_failed.connect(self._show_hotkey_warning)
         self.hotkeys.start()
+        self.single_instance.command_received.connect(self.handle_command)
 
     def _update_icons(self) -> QIcon:
         accent, foreground = theme_accent_colors(self.palette_key, self.appearance)
@@ -103,7 +107,9 @@ class DandoriRuntime:
         self.tray_icon.setToolTip("タスク管理")
         menu = QMenu()
         menu.addAction("全表示", self.show_main)
-        menu.addAction("タスク追加    Ctrl+Alt+N", self.show_edge_add)
+        self.tray_add_action = menu.addAction(
+            "タスク追加    Ctrl+Alt+N", self.show_edge_add
+        )
         menu.addAction("タスク表示    Ctrl+Alt+T", self.show_edge_tasks)
         menu.addAction("カラーテーマ", self.show_theme_settings)
         menu.addSeparator()
@@ -160,6 +166,7 @@ class DandoriRuntime:
         else:
             self.show_edge_add()
 
+    @Slot(str)
     def handle_command(self, command: str) -> None:
         if command == "full":
             self.show_main()
@@ -174,8 +181,23 @@ class DandoriRuntime:
 
     def _tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            self.toggle_edge_tasks()
+            self.show_main()
 
+    @Slot(str, str)
+    def _show_hotkey_fallback(self, unavailable: str, fallback: str) -> None:
+        if self.tray_add_action is not None:
+            self.tray_add_action.setText(
+                f"タスク追加    {fallback.replace(' ', '')}"
+            )
+        if self.tray_icon is not None:
+            self.tray_icon.showMessage(
+                "タスク追加のショートカットを変更しました",
+                f"{unavailable} は他のアプリが使用しています。代わりに {fallback} を使用できます。",
+                QSystemTrayIcon.MessageIcon.Information,
+                7000,
+            )
+
+    @Slot(str)
     def _show_hotkey_warning(self, shortcut: str) -> None:
         if self.tray_icon is not None:
             self.tray_icon.showMessage(

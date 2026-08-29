@@ -78,7 +78,7 @@ def test_create_update_and_complete_task(task_service):
 
 def test_task_views_and_restore(task_service):
     today_task = task_service.create_task(
-        TaskInput(title="今日", due_date=date.today())
+        TaskInput(title="今日", due_date=date.today(), due_time=time(23, 59))
     )
     future_task = task_service.create_task(
         TaskInput(title="今後", due_date=date.today() + timedelta(days=2))
