@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import func, select
 
 from dandori.domain.enums import Priority, TaskStatus
-from dandori.infrastructure.models import Category, TaskHistory
+from dandori.infrastructure.models import Category, TaskHistory, local_now
 from dandori.services.task_service import TaskInput
 
 
@@ -108,6 +108,44 @@ def test_task_views_and_restore(task_service):
 
     assert restored.status_enum is TaskStatus.TODO
     assert task_service.list_tasks_for_view("completed") == []
+
+
+def test_trash_restore_and_permanent_delete(task_service):
+    task = task_service.create_task(TaskInput(title="削除対象"))
+
+    trashed = task_service.trash_task(task.id)
+
+    assert trashed.deleted_at is not None
+    assert trashed.purge_at is not None
+    assert (trashed.purge_at - trashed.deleted_at).days == 30
+    assert task_service.list_active_tasks() == []
+    assert [item.id for item in task_service.list_tasks_for_view("trash")] == [
+        task.id
+    ]
+
+    restored = task_service.restore_trashed_task(task.id)
+
+    assert restored.deleted_at is None
+    assert restored.purge_at is None
+    assert [item.id for item in task_service.list_active_tasks()] == [task.id]
+
+    task_service.trash_task(task.id)
+    task_service.permanently_delete_task(task.id)
+
+    assert task_service.get_task(task.id) is None
+
+
+def test_expired_trash_is_purged(task_service, database):
+    task = task_service.create_task(TaskInput(title="期限切れの削除対象"))
+    task_service.trash_task(task.id)
+    with database.session() as session:
+        stored = session.get(type(task), task.id)
+        assert stored is not None
+        stored.purge_at = local_now() - timedelta(minutes=1)
+        session.commit()
+
+    assert task_service.purge_expired_tasks() == 1
+    assert task_service.get_task(task.id) is None
 
 
 def test_list_tasks_for_selected_date(task_service):

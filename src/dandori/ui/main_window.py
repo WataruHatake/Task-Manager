@@ -37,12 +37,14 @@ class MainWindow(QMainWindow):
         "all": "すべてのタスク",
         "overdue": "期限切れ",
         "completed": "完了済み・取り消し",
+        "trash": "ゴミ箱",
     }
 
     def __init__(self, task_service: TaskService, parent=None) -> None:
         super().__init__(parent)
         self.task_service = task_service
         self.current_task_view = "today"
+        self._undo_kind = "complete"
         self.hide_to_tray = False
         self.setWindowTitle("タスク管理")
         self.resize(1080, 720)
@@ -99,7 +101,7 @@ class MainWindow(QMainWindow):
         content_layout.addLayout(header)
         content_layout.addWidget(self.search_edit)
         self.undo_bar = UndoBar()
-        self.undo_bar.undo_requested.connect(self._restore_task)
+        self.undo_bar.undo_requested.connect(self._undo_last_action)
         content_layout.addWidget(self.undo_bar)
         content_layout.addWidget(self.pages, 1)
 
@@ -114,6 +116,11 @@ class MainWindow(QMainWindow):
         self.table_page.edit_requested.connect(self._edit_task)
         self.table_page.complete_requested.connect(self._complete_task)
         self.table_page.restore_requested.connect(self._restore_task)
+        self.table_page.trash_requested.connect(self._trash_task)
+        self.table_page.restore_trash_requested.connect(self._restore_trashed_task)
+        self.table_page.permanent_delete_requested.connect(
+            self._permanently_delete_task
+        )
         self.table_page.add_requested.connect(self._create_task)
         self.calendar_page.edit_requested.connect(self._edit_task)
         self.calendar_page.complete_requested.connect(self._complete_task)
@@ -131,6 +138,7 @@ class MainWindow(QMainWindow):
             ("all", "□  すべて"),
             ("overdue", "！  期限切れ"),
             ("completed", "✓  完了済み"),
+            ("trash", "♲  ゴミ箱"),
         )
         self.nav_buttons: dict[str, QPushButton] = {}
         nav_group = QButtonGroup(self)
@@ -183,8 +191,8 @@ class MainWindow(QMainWindow):
             self.list_button.click()
         self.current_task_view = view
         self.page_title.setText(self.VIEW_TITLES[view])
-        self.calendar_button.setEnabled(view != "completed")
-        if view == "completed" and self.pages.currentWidget() is self.calendar_page:
+        self.calendar_button.setEnabled(view not in ("completed", "trash"))
+        if view in ("completed", "trash") and self.pages.currentWidget() is self.calendar_page:
             self.list_button.click()
         self.refresh()
 
@@ -220,17 +228,51 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "タスクなし", "タスクが見つかりません。")
             return
         dialog = TaskDialog(self.task_service, task=task, parent=self)
-        if dialog.exec():
+        if dialog.exec() and dialog.saved_task:
             self.refresh(task_id)
 
     def _complete_task(self, task_id: str) -> None:
         self.task_service.complete_task(task_id)
         self.refresh()
+        self._undo_kind = "complete"
         self.undo_bar.show_for_task(task_id)
 
     def _restore_task(self, task_id: str) -> None:
         self.task_service.restore_task(task_id)
         self.refresh(task_id)
+
+    def _trash_task(self, task_id: str) -> None:
+        self.task_service.trash_task(task_id)
+        self.refresh()
+        self._undo_kind = "trash"
+        self.undo_bar.show_for_task(task_id, "タスクをゴミ箱へ移動しました")
+
+    def _restore_trashed_task(self, task_id: str) -> None:
+        self.task_service.restore_trashed_task(task_id)
+        self.refresh(task_id)
+
+    def _permanently_delete_task(self, task_id: str) -> None:
+        task = self.task_service.get_task(task_id)
+        if task is None:
+            self.refresh()
+            return
+        answer = QMessageBox.question(
+            self,
+            "完全に削除",
+            f"「{task.title}」を完全に削除しますか？\nこの操作は元に戻せません。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.task_service.permanently_delete_task(task_id)
+        self.refresh()
+
+    def _undo_last_action(self, task_id: str) -> None:
+        if self._undo_kind == "trash":
+            self._restore_trashed_task(task_id)
+        else:
+            self._restore_task(task_id)
 
     def _focus_search(self) -> None:
         if self.pages.currentWidget() is not self.table_page:

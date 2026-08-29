@@ -531,7 +531,7 @@ class EdgeAddWindow(EdgeWindowBase):
             due_time_value = self.due_time.time_value()
         return TaskInput(
             title=self.title_edit.text(),
-            priority=self.priority.currentData(),
+            priority=Priority(int(self.priority.currentData())),
             due_date=due_date_value,
             due_time=due_time_value,
             category_id=self.category.currentData(),

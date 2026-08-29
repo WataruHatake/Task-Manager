@@ -217,8 +217,8 @@ class TaskDialog(QDialog):
         return TaskInput(
             title=self.title_edit.text(),
             memo=self.memo_edit.toPlainText(),
-            status=self.status_combo.currentData(),
-            priority=self.priority_combo.currentData(),
+            status=TaskStatus(self.status_combo.currentData()),
+            priority=Priority(int(self.priority_combo.currentData())),
             due_date=due_date_value,
             due_time=due_time_value,
             category_id=self.category_combo.currentData(),

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, Slot
+from PySide6.QtCore import QObject, Qt, QTimer, Slot
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
@@ -54,6 +54,7 @@ class DandoriRuntime(QObject):
         self.database = Database(paths.database_file)
         self.database.initialize()
         self.task_service = TaskService(self.database)
+        self.task_service.purge_expired_tasks()
         self.single_instance = single_instance
         theme_setting = self.task_service.get_setting("theme", {})
         if not isinstance(theme_setting, dict):
@@ -87,6 +88,10 @@ class DandoriRuntime(QObject):
         self.hotkeys.registration_failed.connect(self._show_hotkey_warning)
         self.hotkeys.start()
         self.single_instance.command_received.connect(self.handle_command)
+        self.trash_purge_timer = QTimer(self)
+        self.trash_purge_timer.setInterval(60 * 60 * 1000)
+        self.trash_purge_timer.timeout.connect(self._purge_expired_trash)
+        self.trash_purge_timer.start()
 
     def _update_icons(self) -> QIcon:
         accent, foreground = theme_accent_colors(self.palette_key, self.appearance)
@@ -178,6 +183,11 @@ class DandoriRuntime(QObject):
     def _task_created(self, task_id: str) -> None:
         self.main_window.refresh(task_id)
         self.edge_tasks.refresh()
+
+    def _purge_expired_trash(self) -> None:
+        if self.task_service.purge_expired_tasks():
+            self.main_window.refresh()
+            self.edge_tasks.refresh()
 
     def _tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:

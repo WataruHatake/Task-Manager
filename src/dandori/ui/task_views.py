@@ -33,6 +33,9 @@ class TaskDetailWidget(QFrame):
     edit_requested = Signal(str)
     complete_requested = Signal(str)
     restore_requested = Signal(str)
+    trash_requested = Signal(str)
+    restore_trash_requested = Signal(str)
+    permanent_delete_requested = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -50,12 +53,16 @@ class TaskDetailWidget(QFrame):
         self.memo_value = QLabel("—")
         self.memo_value.setWordWrap(True)
         self.subtask_value = QLabel("—")
+        self.purge_value = QLabel("—")
 
         self.edit_button = QPushButton("編集")
         self.complete_button = QPushButton("完了")
         self.complete_button.setObjectName("primaryButton")
+        self.delete_button = QPushButton("ゴミ箱へ")
+        self.delete_button.setObjectName("dangerButton")
         self.edit_button.clicked.connect(self._emit_edit)
         self.complete_button.clicked.connect(self._emit_primary_action)
+        self.delete_button.clicked.connect(self._emit_delete_action)
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
@@ -69,6 +76,9 @@ class TaskDetailWidget(QFrame):
         self._add_field(content_layout, "メモ", self.memo_value)
         self.subtask_field_label = self._add_field(
             content_layout, "サブタスク", self.subtask_value
+        )
+        self.purge_field_label = self._add_field(
+            content_layout, "自動削除", self.purge_value
         )
         content_layout.addStretch()
 
@@ -87,6 +97,7 @@ class TaskDetailWidget(QFrame):
         layout.setSpacing(7)
         layout.addWidget(scroll, 1)
         layout.addLayout(actions)
+        layout.addWidget(self.delete_button)
         self.set_task(None)
 
     @staticmethod
@@ -101,13 +112,21 @@ class TaskDetailWidget(QFrame):
     def set_task(self, task: Task | None) -> None:
         self._task = task
         enabled = task is not None
+        trashed = bool(task and task.deleted_at is not None)
         self.edit_button.setEnabled(enabled)
         terminal = bool(
             task
             and task.status_enum in (TaskStatus.COMPLETED, TaskStatus.CANCELLED)
         )
         self.complete_button.setEnabled(enabled)
-        self.complete_button.setText("元に戻す" if terminal else "完了")
+        self.delete_button.setEnabled(enabled)
+        self.edit_button.setVisible(not trashed)
+        if trashed:
+            self.complete_button.setText("復元")
+            self.delete_button.setText("完全に削除")
+        else:
+            self.complete_button.setText("元に戻す" if terminal else "完了")
+            self.delete_button.setText("ゴミ箱へ")
         if task is None:
             self.title_label.setText("タスクを選択してください")
             for label in (
@@ -117,10 +136,13 @@ class TaskDetailWidget(QFrame):
                 self.category_value,
                 self.memo_value,
                 self.subtask_value,
+                self.purge_value,
             ):
                 label.setText("—")
             self.subtask_field_label.hide()
             self.subtask_value.hide()
+            self.purge_field_label.hide()
+            self.purge_value.hide()
             return
         self.title_label.setText(task.title)
         self.status_value.setText(task.status_enum.label)
@@ -132,6 +154,11 @@ class TaskDetailWidget(QFrame):
         self.subtask_value.setText(f"{completed}/{len(task.subtasks)}" if task.subtasks else "なし")
         self.subtask_field_label.setVisible(bool(task.subtasks))
         self.subtask_value.setVisible(bool(task.subtasks))
+        self.purge_value.setText(
+            task.purge_at.strftime("%Y/%m/%d") if task.purge_at else "—"
+        )
+        self.purge_field_label.setVisible(trashed)
+        self.purge_value.setVisible(trashed)
 
     def _emit_edit(self) -> None:
         if self._task:
@@ -140,10 +167,20 @@ class TaskDetailWidget(QFrame):
     def _emit_primary_action(self) -> None:
         if self._task is None:
             return
-        if self._task.status_enum in (TaskStatus.COMPLETED, TaskStatus.CANCELLED):
+        if self._task.deleted_at is not None:
+            self.restore_trash_requested.emit(self._task.id)
+        elif self._task.status_enum in (TaskStatus.COMPLETED, TaskStatus.CANCELLED):
             self.restore_requested.emit(self._task.id)
         else:
             self.complete_requested.emit(self._task.id)
+
+    def _emit_delete_action(self) -> None:
+        if self._task is None:
+            return
+        if self._task.deleted_at is not None:
+            self.permanent_delete_requested.emit(self._task.id)
+        else:
+            self.trash_requested.emit(self._task.id)
 
 
 class TaskTablePage(QWidget):
@@ -151,6 +188,9 @@ class TaskTablePage(QWidget):
     edit_requested = Signal(str)
     complete_requested = Signal(str)
     restore_requested = Signal(str)
+    trash_requested = Signal(str)
+    restore_trash_requested = Signal(str)
+    permanent_delete_requested = Signal(str)
     add_requested = Signal()
 
     HEADERS = ("タスク", "状態", "重要度", "期限", "カテゴリ")
@@ -158,6 +198,7 @@ class TaskTablePage(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.tasks: list[Task] = []
+        self.current_view = "all"
         self.table = QTableWidget(0, len(self.HEADERS))
         self.table.setHorizontalHeaderLabels(self.HEADERS)
         self.table.setAlternatingRowColors(True)
@@ -177,9 +218,12 @@ class TaskTablePage(QWidget):
         empty_widget = QWidget()
         self.empty_title = QLabel("表示するタスクはありません")
         self.empty_title.setObjectName("detailTitle")
+        self.empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_title.setMinimumHeight(28)
         self.empty_hint = QLabel("新しいタスクを追加すると、ここに表示されます。")
         self.empty_hint.setObjectName("muted")
-        self.empty_hint.setWordWrap(True)
+        self.empty_hint.setMinimumHeight(24)
+        self.empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_button = QPushButton("＋ タスクを追加")
         self.empty_button.setObjectName("primaryButton")
         self.empty_button.clicked.connect(lambda: self.add_requested.emit())
@@ -208,6 +252,11 @@ class TaskTablePage(QWidget):
         self.detail.edit_requested.connect(self.edit_requested)
         self.detail.complete_requested.connect(self.complete_requested)
         self.detail.restore_requested.connect(self.restore_requested)
+        self.detail.trash_requested.connect(self.trash_requested)
+        self.detail.restore_trash_requested.connect(self.restore_trash_requested)
+        self.detail.permanent_delete_requested.connect(
+            self.permanent_delete_requested
+        )
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(table_surface)
@@ -230,7 +279,11 @@ class TaskTablePage(QWidget):
                 task.title,
                 task.status_enum.label,
                 task.priority_enum.label,
-                format_due(task),
+                (
+                    task.purge_at.strftime("%Y/%m/%d")
+                    if self.current_view == "trash" and task.purge_at
+                    else format_due(task)
+                ),
                 task.category.name,
             )
             for column, value in enumerate(values):
@@ -249,25 +302,36 @@ class TaskTablePage(QWidget):
             self.detail.set_task(None)
 
     def set_empty_context(self, view: str) -> None:
+        self.current_view = view
+        self.table.setHorizontalHeaderLabels(
+            ("タスク", "状態", "重要度", "自動削除", "カテゴリ")
+            if view == "trash"
+            else self.HEADERS
+        )
         messages = {
             "today": (
-                "今日が期限のタスクはありません",
-                "必要なタスクがあれば追加できます。",
+                "今日のタスクはありません",
+                "今日対応するタスクを追加できます。",
                 True,
             ),
             "all": (
-                "表示するタスクはありません",
-                "新しいタスクを追加すると、ここに表示されます。",
+                "タスクはまだありません",
+                "最初のタスクを追加しましょう。",
                 True,
             ),
             "overdue": (
                 "期限切れのタスクはありません",
-                "現在、対応が遅れているタスクはありません。",
+                "現在、期限を過ぎたタスクはありません。",
                 False,
             ),
             "completed": (
-                "完了済みのタスクはありません",
-                "完了または取り消したタスクがここに表示されます。",
+                "完了したタスクはありません",
+                "完了または取り消したタスクが表示されます。",
+                False,
+            ),
+            "trash": (
+                "ゴミ箱は空です",
+                "削除したタスクは30日間ここに保存されます。",
                 False,
             ),
         }
@@ -278,7 +342,8 @@ class TaskTablePage(QWidget):
 
     def _emit_edit(self) -> None:
         task_id = self.selected_task_id()
-        if task_id:
+        row = self.table.currentRow()
+        if task_id and row >= 0 and self.tasks[row].deleted_at is None:
             self.edit_requested.emit(task_id)
 
     def selected_task_id(self) -> str | None:

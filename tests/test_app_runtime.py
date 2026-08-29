@@ -29,6 +29,8 @@ def test_runtime_routes_shortcut_and_tray_click_to_main(qtbot, qapp, tmp_path):
     runtime._tray_activated(QSystemTrayIcon.ActivationReason.Trigger)
 
     assert runtime.main_window.isVisible()
+    assert runtime.trash_purge_timer.isActive()
+    runtime.trash_purge_timer.stop()
     runtime.hotkeys.stop()
     runtime.database.dispose()
 

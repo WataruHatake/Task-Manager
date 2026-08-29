@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import Select, or_, select, update
 from sqlalchemy.orm import selectinload
@@ -24,6 +24,8 @@ class TaskInput:
 
 
 class TaskService:
+    TRASH_RETENTION_DAYS = 30
+
     def __init__(self, database: Database) -> None:
         self.database = database
 
@@ -145,6 +147,21 @@ class TaskService:
         return sorted(tasks, key=self._sort_key)
 
     def list_tasks_for_view(self, view: str, search_text: str = "") -> list[Task]:
+        if view == "trash":
+            with self.database.session() as session:
+                statement = self._task_query().where(Task.deleted_at.is_not(None))
+                if search_text.strip():
+                    value = f"%{search_text.strip()}%"
+                    statement = statement.where(
+                        or_(Task.title.like(value), Task.memo.like(value))
+                    )
+                tasks = list(session.scalars(statement))
+            return sorted(
+                tasks,
+                key=lambda task: task.deleted_at or datetime.min,
+                reverse=True,
+            )
+
         if view == "completed":
             with self.database.session() as session:
                 statement = self._task_query().where(
@@ -288,6 +305,82 @@ class TaskService:
             ),
         )
 
+    def trash_task(self, task_id: str) -> Task:
+        with self.database.session() as session:
+            task = session.get(Task, task_id)
+            if task is None:
+                raise LookupError("タスクが見つかりません。")
+            if task.deleted_at is not None:
+                return session.scalar(self._task_query().where(Task.id == task_id))
+            before = self._snapshot(task)
+            deleted_at = local_now()
+            task.deleted_at = deleted_at
+            task.purge_at = deleted_at + timedelta(days=self.TRASH_RETENTION_DAYS)
+            task.updated_at = deleted_at
+            task.version += 1
+            session.flush()
+            session.add(
+                TaskHistory(
+                    task_id=task.id,
+                    action="trashed",
+                    before_json=json.dumps(before, ensure_ascii=False),
+                    after_json=json.dumps(self._snapshot(task), ensure_ascii=False),
+                )
+            )
+            session.commit()
+            return session.scalar(self._task_query().where(Task.id == task_id))
+
+    def restore_trashed_task(self, task_id: str) -> Task:
+        with self.database.session() as session:
+            task = session.get(Task, task_id)
+            if task is None:
+                raise LookupError("タスクが見つかりません。")
+            if task.deleted_at is None:
+                return session.scalar(self._task_query().where(Task.id == task_id))
+            before = self._snapshot(task)
+            task.deleted_at = None
+            task.purge_at = None
+            task.updated_at = local_now()
+            task.version += 1
+            session.flush()
+            session.add(
+                TaskHistory(
+                    task_id=task.id,
+                    action="restored_from_trash",
+                    before_json=json.dumps(before, ensure_ascii=False),
+                    after_json=json.dumps(self._snapshot(task), ensure_ascii=False),
+                )
+            )
+            session.commit()
+            return session.scalar(self._task_query().where(Task.id == task_id))
+
+    def permanently_delete_task(self, task_id: str) -> None:
+        with self.database.session() as session:
+            task = session.get(Task, task_id)
+            if task is None:
+                raise LookupError("タスクが見つかりません。")
+            if task.deleted_at is None:
+                raise ValueError("完全削除はゴミ箱内のタスクだけ実行できます。")
+            session.delete(task)
+            session.commit()
+
+    def purge_expired_tasks(self) -> int:
+        now = local_now()
+        with self.database.session() as session:
+            tasks = list(
+                session.scalars(
+                    select(Task).where(
+                        Task.deleted_at.is_not(None),
+                        Task.purge_at.is_not(None),
+                        Task.purge_at <= now,
+                    )
+                )
+            )
+            for task in tasks:
+                session.delete(task)
+            session.commit()
+            return len(tasks)
+
     @staticmethod
     def _to_due_at(due_date: date | None, due_time: time | None) -> tuple[datetime | None, bool]:
         if due_date is None:
@@ -318,6 +411,8 @@ class TaskService:
             "due_at": task.due_at.isoformat() if task.due_at else None,
             "due_has_time": task.due_has_time,
             "category_id": task.category_id,
+            "deleted_at": task.deleted_at.isoformat() if task.deleted_at else None,
+            "purge_at": task.purge_at.isoformat() if task.purge_at else None,
         }
 
     @staticmethod

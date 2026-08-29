@@ -5,6 +5,7 @@ from datetime import date, time, timedelta
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import QPushButton
 
+from dandori.domain.enums import TaskStatus
 from dandori.services.task_service import TaskInput
 from dandori.ui.calendar_page import CalendarPage
 from dandori.ui.edge_windows import EdgeAddWindow, EdgeTaskWindow
@@ -100,6 +101,45 @@ def test_main_navigation_matches_task_views_and_can_restore(qtbot, task_service)
 
     window._restore_task(today_task.id)
     assert window.table_page.table.rowCount() == 0
+
+
+def test_completed_task_can_be_edited(qtbot, task_service):
+    task = task_service.create_task(TaskInput(title="編集前"))
+    task_service.complete_task(task.id)
+    dialog = TaskDialog(task_service, task=task_service.get_task(task.id))
+    qtbot.addWidget(dialog)
+
+    assert TaskStatus(dialog.status_combo.currentData()) is TaskStatus.COMPLETED
+    dialog.title_edit.setText("編集後")
+    dialog._save()
+
+    updated = task_service.get_task(task.id)
+    assert updated is not None
+    assert updated.title == "編集後"
+    assert updated.status_enum.value == "completed"
+
+
+def test_trash_view_can_restore_tasks_and_has_clear_empty_message(
+    qtbot, task_service
+):
+    task = task_service.create_task(TaskInput(title="ゴミ箱へ移動"))
+    window = MainWindow(task_service)
+    qtbot.addWidget(window)
+    window.nav_buttons["all"].click()
+
+    window._trash_task(task.id)
+    window.nav_buttons["trash"].click()
+
+    assert window.page_title.text() == "ゴミ箱"
+    assert window.table_page.table.rowCount() == 1
+    assert window.table_page.detail.complete_button.text() == "復元"
+    assert window.table_page.detail.delete_button.text() == "完全に削除"
+
+    window._restore_trashed_task(task.id)
+
+    assert window.table_page.table.rowCount() == 0
+    assert window.table_page.empty_title.text() == "ゴミ箱は空です"
+    assert "30日間" in window.table_page.empty_hint.text()
 
 
 def test_quick_add_values_are_carried_into_detail_dialog(qtbot, task_service):
