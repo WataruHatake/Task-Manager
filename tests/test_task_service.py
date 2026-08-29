@@ -76,6 +76,55 @@ def test_create_update_and_complete_task(task_service):
     assert task_service.list_active_tasks() == []
 
 
+def test_progress_is_saved_separately_from_memo_and_completion(task_service):
+    task = task_service.create_task(
+        TaskInput(
+            title="進捗管理",
+            memo="完了条件を確認する",
+            progress_note="資料を作成中",
+            progress_percent=35,
+        )
+    )
+
+    assert task.memo == "完了条件を確認する"
+    assert task.progress_note == "資料を作成中"
+    assert task.progress_percent == 35
+    assert [item.id for item in task_service.list_active_tasks("資料を作成中")] == [
+        task.id
+    ]
+
+    updated = task_service.update_task(
+        task.id,
+        TaskInput(
+            title=task.title,
+            memo=task.memo,
+            progress_note="先方回答待ち",
+            progress_percent=100,
+            status=TaskStatus.IN_PROGRESS,
+            category_id=task.category_id,
+        ),
+    )
+
+    assert updated.progress_note == "先方回答待ち"
+    assert updated.progress_percent == 100
+    assert updated.status_enum is TaskStatus.IN_PROGRESS
+
+    completed = task_service.complete_task(task.id)
+
+    assert completed.progress_percent == 100
+    assert completed.status_enum is TaskStatus.COMPLETED
+
+
+@pytest.mark.parametrize("progress_percent", [-1, 101])
+def test_progress_percent_must_be_between_zero_and_one_hundred(
+    task_service, progress_percent
+):
+    with pytest.raises(ValueError, match="0～100"):
+        task_service.create_task(
+            TaskInput(title="不正な進捗", progress_percent=progress_percent)
+        )
+
+
 def test_task_views_and_restore(task_service):
     today_task = task_service.create_task(
         TaskInput(title="今日", due_date=date.today(), due_time=time(23, 59))

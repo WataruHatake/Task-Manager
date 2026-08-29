@@ -153,6 +153,21 @@ QPushButton#primaryButton {
 }
 QPushButton#primaryButton:hover { background: $accent_hover; border-color: $accent_hover; }
 QPushButton#dangerButton { color: $danger; }
+QProgressBar#taskProgress {
+    min-height: 18px;
+    max-height: 18px;
+    background: $control;
+    color: $text;
+    border: 1px solid $border_strong;
+    border-radius: 6px;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 700;
+}
+QProgressBar#taskProgress::chunk {
+    background: $accent;
+    border-radius: 5px;
+}
 QPushButton#compactButton, QPushButton#edgeClose {
     min-width: 28px;
     max-width: 28px;

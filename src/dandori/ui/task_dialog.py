@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -55,6 +56,15 @@ class TaskDialog(QDialog):
         self.memo_edit = QTextEdit()
         self.memo_edit.setPlaceholderText("補足、完了条件、確認事項など")
         self.memo_edit.setMinimumHeight(90)
+        self.progress_note_edit = QTextEdit()
+        self.progress_note_edit.setPlaceholderText(
+            "例：資料作成中、先方回答待ち、レビュー対応中"
+        )
+        self.progress_note_edit.setMinimumHeight(72)
+        self.progress_percent_spin = QSpinBox()
+        self.progress_percent_spin.setRange(0, 100)
+        self.progress_percent_spin.setSingleStep(5)
+        self.progress_percent_spin.setSuffix(" %")
 
         self.status_combo = QComboBox()
         statuses = tuple(TaskStatus) if task else ACTIVE_STATUSES
@@ -94,6 +104,8 @@ class TaskDialog(QDialog):
         form.setSpacing(10)
         form.addRow("タスク名 *", self.title_edit)
         form.addRow("メモ", self.memo_edit)
+        form.addRow("現在の進捗", self.progress_note_edit)
+        form.addRow("進捗率", self.progress_percent_spin)
         form.addRow("状態", self.status_combo)
         form.addRow("重要度", self.priority_combo)
         form.addRow("カテゴリ", category_row)
@@ -141,6 +153,8 @@ class TaskDialog(QDialog):
             if initial_input is not None:
                 self.title_edit.setText(initial_input.title)
                 self.memo_edit.setPlainText(initial_input.memo)
+                self.progress_note_edit.setPlainText(initial_input.progress_note)
+                self.progress_percent_spin.setValue(initial_input.progress_percent)
                 self.status_combo.setCurrentIndex(
                     max(0, self.status_combo.findData(initial_input.status))
                 )
@@ -169,6 +183,8 @@ class TaskDialog(QDialog):
             return
         self.title_edit.setText(task.title)
         self.memo_edit.setPlainText(task.memo)
+        self.progress_note_edit.setPlainText(task.progress_note)
+        self.progress_percent_spin.setValue(task.progress_percent)
         self.status_combo.setCurrentIndex(self.status_combo.findData(task.status_enum))
         self.priority_combo.setCurrentIndex(self.priority_combo.findData(task.priority_enum))
         self.category_combo.setCurrentIndex(self.category_combo.findData(task.category_id))
@@ -217,6 +233,8 @@ class TaskDialog(QDialog):
         return TaskInput(
             title=self.title_edit.text(),
             memo=self.memo_edit.toPlainText(),
+            progress_note=self.progress_note_edit.toPlainText(),
+            progress_percent=self.progress_percent_spin.value(),
             status=TaskStatus(self.status_combo.currentData()),
             priority=Priority(int(self.priority_combo.currentData())),
             due_date=due_date_value,
@@ -241,6 +259,8 @@ class TaskDialog(QDialog):
         return (
             self.title_edit.text(),
             self.memo_edit.toPlainText(),
+            self.progress_note_edit.toPlainText(),
+            self.progress_percent_spin.value(),
             self.status_combo.currentData(),
             self.priority_combo.currentData(),
             self.category_combo.currentData(),

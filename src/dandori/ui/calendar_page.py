@@ -156,7 +156,10 @@ class DayTaskList(QFrame):
             self.content_layout.insertWidget(0, empty)
             return
         for task in tasks:
-            button = QPushButton(f"{task.title}\n{format_due(task)} ・ {task.priority_enum.label}")
+            button = QPushButton(
+                f"{task.title}\n"
+                f"{format_due(task)} ・ {task.priority_enum.label} ・ {task.progress_percent}%"
+            )
             button.setMinimumHeight(60)
             button.setStyleSheet("text-align: left; padding: 8px 4px; border-width: 0 0 1px 0;")
             button.clicked.connect(

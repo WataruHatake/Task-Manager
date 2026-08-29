@@ -104,18 +104,26 @@ def test_main_navigation_matches_task_views_and_can_restore(qtbot, task_service)
 
 
 def test_completed_task_can_be_edited(qtbot, task_service):
-    task = task_service.create_task(TaskInput(title="編集前"))
+    task = task_service.create_task(
+        TaskInput(title="編集前", progress_note="対応中", progress_percent=40)
+    )
     task_service.complete_task(task.id)
     dialog = TaskDialog(task_service, task=task_service.get_task(task.id))
     qtbot.addWidget(dialog)
 
     assert TaskStatus(dialog.status_combo.currentData()) is TaskStatus.COMPLETED
+    assert dialog.progress_note_edit.toPlainText() == "対応中"
+    assert dialog.progress_percent_spin.value() == 40
     dialog.title_edit.setText("編集後")
+    dialog.progress_note_edit.setPlainText("確認待ち")
+    dialog.progress_percent_spin.setValue(75)
     dialog._save()
 
     updated = task_service.get_task(task.id)
     assert updated is not None
     assert updated.title == "編集後"
+    assert updated.progress_note == "確認待ち"
+    assert updated.progress_percent == 75
     assert updated.status_enum.value == "completed"
 
 

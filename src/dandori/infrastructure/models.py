@@ -59,6 +59,8 @@ class Task(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     memo: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    progress_note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    progress_percent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default=TaskStatus.TODO.value)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=int(Priority.NORMAL))
     due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

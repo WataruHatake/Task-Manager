@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -47,6 +48,13 @@ class TaskDetailWidget(QFrame):
         self.title_label.setWordWrap(True)
 
         self.status_value = QLabel("—")
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("%p%")
+        self.progress_bar.setObjectName("taskProgress")
+        self.progress_note_value = QLabel("—")
+        self.progress_note_value.setWordWrap(True)
         self.due_value = QLabel("—")
         self.priority_value = QLabel("—")
         self.category_value = QLabel("—")
@@ -70,6 +78,8 @@ class TaskDetailWidget(QFrame):
         content_layout.setSpacing(7)
         content_layout.addWidget(self.title_label)
         self._add_field(content_layout, "状態", self.status_value)
+        self._add_field(content_layout, "進捗率", self.progress_bar)
+        self._add_field(content_layout, "現在の進捗", self.progress_note_value)
         self._add_field(content_layout, "期限", self.due_value)
         self._add_field(content_layout, "重要度", self.priority_value)
         self._add_field(content_layout, "カテゴリ", self.category_value)
@@ -101,7 +111,7 @@ class TaskDetailWidget(QFrame):
         self.set_task(None)
 
     @staticmethod
-    def _add_field(layout: QVBoxLayout, label: str, value: QLabel) -> QLabel:
+    def _add_field(layout: QVBoxLayout, label: str, value: QWidget) -> QLabel:
         field_label = QLabel(label)
         field_label.setObjectName("fieldLabel")
         layout.addSpacing(6)
@@ -131,6 +141,7 @@ class TaskDetailWidget(QFrame):
             self.title_label.setText("タスクを選択してください")
             for label in (
                 self.status_value,
+                self.progress_note_value,
                 self.due_value,
                 self.priority_value,
                 self.category_value,
@@ -143,9 +154,12 @@ class TaskDetailWidget(QFrame):
             self.subtask_value.hide()
             self.purge_field_label.hide()
             self.purge_value.hide()
+            self.progress_bar.setValue(0)
             return
         self.title_label.setText(task.title)
         self.status_value.setText(task.status_enum.label)
+        self.progress_bar.setValue(task.progress_percent)
+        self.progress_note_value.setText(task.progress_note or "未入力")
         self.due_value.setText(format_due(task))
         self.priority_value.setText(task.priority_enum.label)
         self.category_value.setText(task.category.name)
@@ -193,7 +207,7 @@ class TaskTablePage(QWidget):
     permanent_delete_requested = Signal(str)
     add_requested = Signal()
 
-    HEADERS = ("タスク", "状態", "重要度", "期限", "カテゴリ")
+    HEADERS = ("タスク", "状態", "進捗", "重要度", "期限", "カテゴリ")
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -278,6 +292,7 @@ class TaskTablePage(QWidget):
             values = (
                 task.title,
                 task.status_enum.label,
+                f"{task.progress_percent}%",
                 task.priority_enum.label,
                 (
                     task.purge_at.strftime("%Y/%m/%d")
@@ -304,7 +319,7 @@ class TaskTablePage(QWidget):
     def set_empty_context(self, view: str) -> None:
         self.current_view = view
         self.table.setHorizontalHeaderLabels(
-            ("タスク", "状態", "重要度", "自動削除", "カテゴリ")
+            ("タスク", "状態", "進捗", "重要度", "自動削除", "カテゴリ")
             if view == "trash"
             else self.HEADERS
         )
@@ -339,6 +354,10 @@ class TaskTablePage(QWidget):
         self.empty_title.setText(title)
         self.empty_hint.setText(hint)
         self.empty_button.setVisible(show_add)
+
+    def set_compact(self, compact: bool) -> None:
+        self.table.setColumnHidden(1, compact)
+        self.table.setColumnHidden(5, compact)
 
     def _emit_edit(self) -> None:
         task_id = self.selected_task_id()

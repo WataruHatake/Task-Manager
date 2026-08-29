@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -63,6 +64,12 @@ class EdgeTaskDetail(QWidget):
         self.title.setObjectName("edgeTitle")
         self.title.setWordWrap(True)
         self.status = QLabel()
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        self.progress.setFormat("%p%")
+        self.progress.setObjectName("taskProgress")
+        self.progress_note = QLabel()
+        self.progress_note.setWordWrap(True)
         self.due = QLabel()
         self.priority = QLabel()
         self.category = QLabel()
@@ -76,6 +83,8 @@ class EdgeTaskDetail(QWidget):
         content_layout.addWidget(self.title)
         for label, value in (
             ("状態", self.status),
+            ("進捗率", self.progress),
+            ("現在の進捗", self.progress_note),
             ("期限", self.due),
             ("重要度", self.priority),
             ("カテゴリ", self.category),
@@ -115,6 +124,8 @@ class EdgeTaskDetail(QWidget):
         self.task = task
         self.title.setText(task.title)
         self.status.setText(task.status_enum.label)
+        self.progress.setValue(task.progress_percent)
+        self.progress_note.setText(task.progress_note or "未入力")
         self.due.setText(format_due(task))
         self.priority.setText(task.priority_enum.label)
         self.category.setText(task.category.name)
@@ -331,7 +342,11 @@ class EdgeTaskWindow(EdgeWindowBase):
         title.setObjectName("edgeTaskTitle")
         title.setWordWrap(True)
         title.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        meta = QLabel(f"{format_due(task)}\n{task.priority_enum.label} ・ {task.status_enum.label}")
+        meta = QLabel(
+            f"{format_due(task)}\n"
+            f"進捗 {task.progress_percent}%\n"
+            f"{task.priority_enum.label} ・ {task.status_enum.label}"
+        )
         meta.setObjectName("muted")
         meta.setWordWrap(True)
         meta.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)

@@ -127,6 +127,7 @@ class MainWindow(QMainWindow):
         self.calendar_page.add_requested.connect(self._create_task_for_date)
         QShortcut(QKeySequence("Ctrl+F"), self).activated.connect(self._focus_search)
         QShortcut(QKeySequence("Ctrl+N"), self).activated.connect(self._create_task)
+        self.table_page.set_compact(self.width() < 900)
         self.refresh()
 
     def _build_sidebar(self) -> QFrame:
@@ -282,6 +283,8 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         self.sidebar.setFixedWidth(140 if event.size().width() < 900 else 176)
+        if hasattr(self, "table_page"):
+            self.table_page.set_compact(event.size().width() < 900)
         super().resizeEvent(event)
 
     def closeEvent(self, event: QCloseEvent) -> None:

@@ -16,6 +16,8 @@ from dandori.infrastructure.models import Category, Setting, Task, TaskHistory, 
 class TaskInput:
     title: str
     memo: str = ""
+    progress_note: str = ""
+    progress_percent: int = 0
     status: TaskStatus = TaskStatus.TODO
     priority: Priority = Priority.NORMAL
     due_date: date | None = None
@@ -142,7 +144,13 @@ class TaskService:
             )
             if search_text.strip():
                 value = f"%{search_text.strip()}%"
-                statement = statement.where(or_(Task.title.like(value), Task.memo.like(value)))
+                statement = statement.where(
+                    or_(
+                        Task.title.like(value),
+                        Task.memo.like(value),
+                        Task.progress_note.like(value),
+                    )
+                )
             tasks = list(session.scalars(statement))
         return sorted(tasks, key=self._sort_key)
 
@@ -153,7 +161,11 @@ class TaskService:
                 if search_text.strip():
                     value = f"%{search_text.strip()}%"
                     statement = statement.where(
-                        or_(Task.title.like(value), Task.memo.like(value))
+                        or_(
+                            Task.title.like(value),
+                            Task.memo.like(value),
+                            Task.progress_note.like(value),
+                        )
                     )
                 tasks = list(session.scalars(statement))
             return sorted(
@@ -173,7 +185,11 @@ class TaskService:
                 if search_text.strip():
                     value = f"%{search_text.strip()}%"
                     statement = statement.where(
-                        or_(Task.title.like(value), Task.memo.like(value))
+                        or_(
+                            Task.title.like(value),
+                            Task.memo.like(value),
+                            Task.progress_note.like(value),
+                        )
                     )
                 tasks = list(session.scalars(statement))
             return sorted(
@@ -215,11 +231,14 @@ class TaskService:
         title = task_input.title.strip()
         if not title:
             raise ValueError("タスク名を入力してください。")
+        progress_percent = self._validate_progress_percent(task_input.progress_percent)
         category_id = task_input.category_id or self.default_category().id
         due_at, due_has_time = self._to_due_at(task_input.due_date, task_input.due_time)
         task = Task(
             title=title,
             memo=task_input.memo.strip(),
+            progress_note=task_input.progress_note.strip(),
+            progress_percent=progress_percent,
             status=task_input.status.value,
             priority=int(task_input.priority),
             due_at=due_at,
@@ -243,6 +262,7 @@ class TaskService:
         title = task_input.title.strip()
         if not title:
             raise ValueError("タスク名を入力してください。")
+        progress_percent = self._validate_progress_percent(task_input.progress_percent)
         with self.database.session() as session:
             task = session.get(Task, task_id)
             if task is None:
@@ -251,6 +271,8 @@ class TaskService:
             due_at, due_has_time = self._to_due_at(task_input.due_date, task_input.due_time)
             task.title = title
             task.memo = task_input.memo.strip()
+            task.progress_note = task_input.progress_note.strip()
+            task.progress_percent = progress_percent
             task.status = task_input.status.value
             task.priority = int(task_input.priority)
             task.due_at = due_at
@@ -280,6 +302,8 @@ class TaskService:
             TaskInput(
                 title=task.title,
                 memo=task.memo,
+                progress_note=task.progress_note,
+                progress_percent=task.progress_percent,
                 status=TaskStatus.COMPLETED,
                 priority=task.priority_enum,
                 due_date=task.due_at.date() if task.due_at else None,
@@ -297,6 +321,8 @@ class TaskService:
             TaskInput(
                 title=task.title,
                 memo=task.memo,
+                progress_note=task.progress_note,
+                progress_percent=task.progress_percent,
                 status=TaskStatus.TODO,
                 priority=task.priority_enum,
                 due_date=task.due_at.date() if task.due_at else None,
@@ -382,6 +408,16 @@ class TaskService:
             return len(tasks)
 
     @staticmethod
+    def _validate_progress_percent(value: int) -> int:
+        try:
+            progress_percent = int(value)
+        except (TypeError, ValueError) as error:
+            raise ValueError("進捗率は0～100%で入力してください。") from error
+        if not 0 <= progress_percent <= 100:
+            raise ValueError("進捗率は0～100%で入力してください。")
+        return progress_percent
+
+    @staticmethod
     def _to_due_at(due_date: date | None, due_time: time | None) -> tuple[datetime | None, bool]:
         if due_date is None:
             return None, False
@@ -406,6 +442,8 @@ class TaskService:
         return {
             "title": task.title,
             "memo": task.memo,
+            "progress_note": task.progress_note,
+            "progress_percent": task.progress_percent,
             "status": task.status,
             "priority": task.priority,
             "due_at": task.due_at.isoformat() if task.due_at else None,
