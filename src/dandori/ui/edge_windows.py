@@ -18,12 +18,14 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSpinBox,
     QStackedWidget,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from dandori.domain.enums import ACTIVE_STATUSES, Priority, TaskStatus
+from dandori.domain.enums import Priority, TaskStatus
 from dandori.infrastructure.models import Task, local_now
 from dandori.services.task_service import TaskInput, TaskService
 from dandori.ui.category_dialog import CategoryManagerDialog
@@ -146,6 +148,258 @@ class EdgeTaskDetail(QWidget):
             self.complete_requested.emit(self.task.id)
 
 
+class EdgeTaskEditor(QWidget):
+    saved = Signal(str)
+    cancel_requested = Signal(str)
+
+    def __init__(self, task_service: TaskService, parent=None) -> None:
+        super().__init__(parent)
+        self.task_service = task_service
+        self.task: Task | None = None
+        self._initial_state: tuple[object, ...] = ()
+
+        back_button = QPushButton("← 詳細へ")
+        back_button.setObjectName("edgeNav")
+        back_button.clicked.connect(self.request_cancel)
+
+        self.title_edit = QLineEdit()
+        self.title_edit.setPlaceholderText("タスク名")
+        self.memo_edit = QTextEdit()
+        self.memo_edit.setPlaceholderText("補足、完了条件、確認事項など")
+        self.memo_edit.setMinimumHeight(76)
+        self.progress_note_edit = QTextEdit()
+        self.progress_note_edit.setPlaceholderText("現在どこまで進んでいるか")
+        self.progress_note_edit.setMinimumHeight(68)
+        self.progress_percent_spin = QSpinBox()
+        self.progress_percent_spin.setRange(0, 100)
+        self.progress_percent_spin.setSingleStep(5)
+        self.progress_percent_spin.setSuffix(" %")
+
+        self.status_combo = QComboBox()
+        for status in TaskStatus:
+            self.status_combo.addItem(status.label, status)
+        self.priority_combo = QComboBox()
+        for priority in Priority:
+            self.priority_combo.addItem(priority.label, priority)
+
+        self.category_combo = QComboBox()
+        self._reload_categories()
+        category_manage = QPushButton("…")
+        category_manage.setObjectName("compactButton")
+        category_manage.setToolTip("カテゴリ管理")
+        category_manage.clicked.connect(self._manage_categories)
+        category_row = QHBoxLayout()
+        category_row.setSpacing(4)
+        category_row.addWidget(self.category_combo, 1)
+        category_row.addWidget(category_manage)
+
+        self.due_mode = QComboBox()
+        self.due_mode.addItem("期限なし", "none")
+        self.due_mode.addItem("日付のみ", "date")
+        self.due_mode.addItem("日時を指定", "datetime")
+        self.due_date_edit = QDateEdit(QDate.currentDate())
+        self.due_date_edit.setCalendarPopup(True)
+        self.due_date_edit.setDisplayFormat("yyyy/MM/dd")
+        self.due_time_edit = TimeComboBox()
+        self.due_time_edit.set_time(time(17, 0))
+
+        form_widget = QWidget()
+        form = QVBoxLayout(form_widget)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(6)
+        form.addWidget(self._field_label("タスク名 *"))
+        form.addWidget(self.title_edit)
+        form.addWidget(self._field_label("メモ"))
+        form.addWidget(self.memo_edit)
+        form.addWidget(self._field_label("現在の進捗"))
+        form.addWidget(self.progress_note_edit)
+        form.addWidget(self._field_label("進捗率"))
+        form.addWidget(self.progress_percent_spin)
+        form.addWidget(self._field_label("状態"))
+        form.addWidget(self.status_combo)
+        form.addWidget(self._field_label("重要度"))
+        form.addWidget(self.priority_combo)
+        form.addWidget(self._field_label("カテゴリ"))
+        form.addLayout(category_row)
+        form.addWidget(self._field_label("期限"))
+        form.addWidget(self.due_mode)
+        self.due_date_label = self._field_label("期限日")
+        form.addWidget(self.due_date_label)
+        form.addWidget(self.due_date_edit)
+        self.due_time_label = self._field_label("期限時刻")
+        form.addWidget(self.due_time_label)
+        form.addWidget(self.due_time_edit)
+        form.addStretch()
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(form_widget)
+
+        cancel_button = QPushButton("キャンセル")
+        cancel_button.clicked.connect(self.request_cancel)
+        save_button = QPushButton("保存")
+        save_button.setObjectName("primaryButton")
+        save_button.clicked.connect(self._save)
+        actions = QHBoxLayout()
+        actions.setSpacing(5)
+        actions.addWidget(cancel_button)
+        actions.addWidget(save_button)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(back_button)
+        layout.addWidget(scroll, 1)
+        layout.addLayout(actions)
+
+        self.due_mode.currentIndexChanged.connect(self._sync_due_controls)
+        for key in ("Ctrl+Return", "Ctrl+Enter"):
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(self._save)
+        cancel_shortcut = QShortcut(QKeySequence("Escape"), self)
+        cancel_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        cancel_shortcut.activated.connect(self.request_cancel)
+        self._sync_due_controls()
+
+    @staticmethod
+    def _field_label(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("fieldLabel")
+        return label
+
+    def set_task(self, task: Task) -> None:
+        self.task = task
+        self.title_edit.setText(task.title)
+        self.memo_edit.setPlainText(task.memo)
+        self.progress_note_edit.setPlainText(task.progress_note)
+        self.progress_percent_spin.setValue(task.progress_percent)
+        self.status_combo.setCurrentIndex(
+            self.status_combo.findData(task.status_enum)
+        )
+        self.priority_combo.setCurrentIndex(
+            self.priority_combo.findData(task.priority_enum)
+        )
+        self._reload_categories(task.category_id)
+        if task.due_at:
+            self.due_date_edit.setDate(
+                QDate(task.due_at.year, task.due_at.month, task.due_at.day)
+            )
+            self.due_mode.setCurrentIndex(2 if task.due_has_time else 1)
+            self.due_time_edit.set_time(time(task.due_at.hour, task.due_at.minute))
+        else:
+            self.due_mode.setCurrentIndex(0)
+            self.due_date_edit.setDate(QDate.currentDate())
+            self.due_time_edit.set_time(time(17, 0))
+        self._sync_due_controls()
+        self._initial_state = self._draft_state()
+        self.title_edit.setFocus()
+
+    def _reload_categories(self, preferred_id: str | None = None) -> None:
+        preferred_id = (
+            preferred_id
+            or self.category_combo.currentData()
+            or self.task_service.default_category().id
+        )
+        self.category_combo.clear()
+        for category in self.task_service.list_categories():
+            self.category_combo.addItem(category.name, category.id)
+        index = self.category_combo.findData(preferred_id)
+        if index < 0:
+            index = self.category_combo.findData(
+                self.task_service.default_category().id
+            )
+        self.category_combo.setCurrentIndex(max(0, index))
+
+    def _manage_categories(self) -> None:
+        preferred_id = self.category_combo.currentData()
+        dialog = CategoryManagerDialog(self.task_service, self)
+        dialog.categories_changed.connect(
+            lambda: self._reload_categories(preferred_id)
+        )
+        dialog.exec()
+        self._reload_categories(preferred_id)
+
+    def _sync_due_controls(self) -> None:
+        mode = self.due_mode.currentData()
+        has_date = mode in ("date", "datetime")
+        has_time = mode == "datetime"
+        self.due_date_label.setVisible(has_date)
+        self.due_date_edit.setVisible(has_date)
+        self.due_time_label.setVisible(has_time)
+        self.due_time_edit.setVisible(has_time)
+
+    def _task_input(self) -> TaskInput:
+        due_date_value = None
+        due_time_value = None
+        if self.due_mode.currentData() in ("date", "datetime"):
+            selected_date = self.due_date_edit.date()
+            due_date_value = date(
+                selected_date.year(), selected_date.month(), selected_date.day()
+            )
+            if self.due_mode.currentData() == "datetime":
+                due_time_value = self.due_time_edit.time_value()
+        return TaskInput(
+            title=self.title_edit.text(),
+            memo=self.memo_edit.toPlainText(),
+            progress_note=self.progress_note_edit.toPlainText(),
+            progress_percent=self.progress_percent_spin.value(),
+            status=TaskStatus(self.status_combo.currentData()),
+            priority=Priority(int(self.priority_combo.currentData())),
+            due_date=due_date_value,
+            due_time=due_time_value,
+            category_id=self.category_combo.currentData(),
+        )
+
+    def _save(self) -> None:
+        if self.task is None:
+            return
+        try:
+            self.task = self.task_service.update_task(
+                self.task.id, self._task_input()
+            )
+        except (ValueError, LookupError) as error:
+            QMessageBox.warning(self, "保存できません", str(error))
+            return
+        self._initial_state = self._draft_state()
+        self.saved.emit(self.task.id)
+
+    def _draft_state(self) -> tuple[object, ...]:
+        return (
+            self.title_edit.text(),
+            self.memo_edit.toPlainText(),
+            self.progress_note_edit.toPlainText(),
+            self.progress_percent_spin.value(),
+            self.status_combo.currentData(),
+            self.priority_combo.currentData(),
+            self.category_combo.currentData(),
+            self.due_mode.currentData(),
+            self.due_date_edit.date().toString("yyyy-MM-dd"),
+            self.due_time_edit.currentText(),
+        )
+
+    def has_unsaved_changes(self) -> bool:
+        return bool(self.task) and self._draft_state() != self._initial_state
+
+    def request_cancel(self) -> None:
+        if self.task is None:
+            return
+        if self.has_unsaved_changes():
+            answer = QMessageBox.question(
+                self,
+                "変更を破棄",
+                "入力中の変更を破棄して詳細へ戻りますか？",
+                QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Discard:
+                return
+        self.cancel_requested.emit(self.task.id)
+
+
 class EdgeWindowBase(QDialog):
     BASE_WIDTH = 180
     WIDTH_OPTIONS = (180, 240, 320)
@@ -257,9 +511,13 @@ class EdgeTaskWindow(EdgeWindowBase):
         self.detail.edit_requested.connect(self._edit)
         self.detail.complete_requested.connect(self._complete)
         self.detail.restore_requested.connect(self._restore)
+        self.editor = EdgeTaskEditor(self.task_service)
+        self.editor.saved.connect(self._editor_saved)
+        self.editor.cancel_requested.connect(self._editor_cancelled)
         self.stack = QStackedWidget()
         self.stack.addWidget(scroll)
         self.stack.addWidget(self.detail)
+        self.stack.addWidget(self.editor)
 
         self.undo_bar = UndoBar()
         self.undo_bar.undo_requested.connect(self._restore)
@@ -398,19 +656,35 @@ class EdgeTaskWindow(EdgeWindowBase):
         task = self.task_service.get_task(task_id)
         if task is None:
             return
-        dialog = TaskDialog(self.task_service, task=task, parent=self)
-        if dialog.exec():
-            self.refresh()
-            self.tasks_changed.emit()
-            updated = self.task_service.get_task(task_id)
-            if updated and updated.status_enum in ACTIVE_STATUSES:
-                self.detail.set_task(updated)
-            else:
-                self._show_list()
+        self.editor.set_task(task)
+        self.stack.setCurrentWidget(self.editor)
+
+    def _editor_saved(self, task_id: str) -> None:
+        self.refresh()
+        self.tasks_changed.emit()
+        updated = self.task_service.get_task(task_id)
+        if updated is None:
+            self._show_list()
+            return
+        self.detail.set_task(updated)
+        self.stack.setCurrentWidget(self.detail)
+
+    def _editor_cancelled(self, task_id: str) -> None:
+        task = self.task_service.get_task(task_id)
+        if task is None:
+            self._show_list()
+            return
+        self.detail.set_task(task)
+        self.stack.setCurrentWidget(self.detail)
 
     def show_at_screen_edge(self) -> None:
+        keep_draft = (
+            self.stack.currentWidget() is self.editor
+            and self.editor.has_unsaved_changes()
+        )
         self.refresh()
-        self._show_list()
+        if not keep_draft:
+            self._show_list()
         super().show_at_screen_edge()
 
 

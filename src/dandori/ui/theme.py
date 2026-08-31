@@ -233,7 +233,7 @@ QPushButton#calendarMore {
 QPushButton#calendarDay[outsideMonth="true"] { color: $disabled_text; }
 QFrame#calendarCell { background: $surface; border-right: 1px solid $border; border-bottom: 1px solid $border; }
 QFrame#calendarCellSelected { background: $selection; border: 1px solid $accent; }
-QLineEdit, QTextEdit, QComboBox, QDateEdit, QTimeEdit {
+QLineEdit, QTextEdit, QComboBox, QDateEdit, QTimeEdit, QSpinBox {
     min-height: 34px;
     padding: 2px 8px;
     background: $input;
@@ -243,7 +243,7 @@ QLineEdit, QTextEdit, QComboBox, QDateEdit, QTimeEdit {
     selection-background-color: $accent;
     selection-color: $accent_text;
 }
-QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QDateEdit:focus, QTimeEdit:focus {
+QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QDateEdit:focus, QTimeEdit:focus, QSpinBox:focus {
     border-color: $accent;
 }
 QComboBox QAbstractItemView {

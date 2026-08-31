@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import date, time, timedelta
 
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QMessageBox, QPushButton
 
-from dandori.domain.enums import TaskStatus
+from dandori.domain.enums import Priority, TaskStatus
 from dandori.services.task_service import TaskInput
 from dandori.ui.calendar_page import CalendarPage
 from dandori.ui.edge_windows import EdgeAddWindow, EdgeTaskWindow
@@ -193,6 +193,82 @@ def test_edge_panel_width_is_saved(qtbot, task_service):
     add_window = EdgeAddWindow(task_service)
     qtbot.addWidget(add_window)
     assert add_window.width() == 240
+
+
+def test_edge_task_editor_updates_all_task_fields_inline(qtbot, task_service):
+    category = task_service.create_category("案件A", "#6B90B2")
+    task = task_service.create_task(TaskInput(title="編集前"))
+    task_window = EdgeTaskWindow(task_service)
+    qtbot.addWidget(task_window)
+
+    task_window._show_task(task.id)
+    task_window._edit(task.id)
+    editor = task_window.editor
+
+    assert task_window.stack.currentWidget() is editor
+    editor.title_edit.setText("右端で編集")
+    editor.memo_edit.setPlainText("確認事項")
+    editor.progress_note_edit.setPlainText("レビュー待ち")
+    editor.progress_percent_spin.setValue(65)
+    editor.status_combo.setCurrentIndex(
+        editor.status_combo.findData(TaskStatus.ON_HOLD)
+    )
+    editor.priority_combo.setCurrentIndex(
+        editor.priority_combo.findData(Priority.CRITICAL)
+    )
+    editor.category_combo.setCurrentIndex(
+        editor.category_combo.findData(category.id)
+    )
+    editor.due_mode.setCurrentIndex(editor.due_mode.findData("datetime"))
+    editor.due_date_edit.setDate(QDate(2026, 9, 8))
+    editor.due_time_edit.set_time(time(15, 30))
+    editor._save()
+
+    updated = task_service.get_task(task.id)
+    assert updated is not None
+    assert updated.title == "右端で編集"
+    assert updated.memo == "確認事項"
+    assert updated.progress_note == "レビュー待ち"
+    assert updated.progress_percent == 65
+    assert updated.status_enum is TaskStatus.ON_HOLD
+    assert updated.priority_enum is Priority.CRITICAL
+    assert updated.category_id == category.id
+    assert updated.due_at.date() == date(2026, 9, 8)
+    assert updated.due_at.time() == time(15, 30)
+    assert task_window.stack.currentWidget() is task_window.detail
+
+
+def test_edge_task_editor_keeps_draft_and_confirms_discard(
+    qtbot, task_service, monkeypatch
+):
+    task = task_service.create_task(TaskInput(title="元の名前"))
+    task_window = EdgeTaskWindow(task_service)
+    qtbot.addWidget(task_window)
+    task_window._edit(task.id)
+    task_window.editor.title_edit.setText("入力途中")
+
+    task_window.hide()
+    task_window.show_at_screen_edge()
+
+    assert task_window.stack.currentWidget() is task_window.editor
+    assert task_window.editor.title_edit.text() == "入力途中"
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args: QMessageBox.StandardButton.Cancel,
+    )
+    task_window.editor.request_cancel()
+    assert task_window.stack.currentWidget() is task_window.editor
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args: QMessageBox.StandardButton.Discard,
+    )
+    task_window.editor.request_cancel()
+    assert task_window.stack.currentWidget() is task_window.detail
+    assert task_service.get_task(task.id).title == "元の名前"
 
 
 def test_quick_add_refreshes_date_when_there_is_no_draft(qtbot, task_service):
