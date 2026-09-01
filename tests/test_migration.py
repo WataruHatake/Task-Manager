@@ -77,11 +77,16 @@ def test_existing_database_is_upgraded_with_progress_fields(tmp_path):
                 "FROM tasks WHERE id = 'task-1'"
             )
         ).one()
+        planned_for_date = migrated.execute(
+            text("SELECT planned_for_date FROM tasks WHERE id = 'task-1'")
+        ).scalar_one_or_none()
         revision = migrated.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
 
     assert {"progress_note", "progress_percent"} <= columns
     assert {"reminder_mode", "reminder_config_json"} <= columns
+    assert "planned_for_date" in columns
     assert row == ("", 0)
     assert reminder_values == ("priority", "{}")
-    assert revision == "0003"
+    assert planned_for_date is None
+    assert revision == "0004"
     database.dispose()

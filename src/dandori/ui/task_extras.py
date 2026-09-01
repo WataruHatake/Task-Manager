@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
-    QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -220,6 +220,98 @@ class AttachmentEditor(QFrame):
         )
 
 
+class DurationInput(QWidget):
+    def __init__(
+        self,
+        maximum_minutes: int,
+        suffix: str,
+        zero_text: str,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.maximum_minutes = maximum_minutes
+        self.suffix = suffix
+        self.zero_text = zero_text
+        self._updating = False
+
+        self.days = QSpinBox()
+        self.hours = QSpinBox()
+        self.minutes_part = QSpinBox()
+        self.days.setRange(0, max(1, maximum_minutes // (24 * 60)))
+        self.hours.setRange(0, 23)
+        self.minutes_part.setRange(0, 59)
+        for spin in (self.days, self.hours, self.minutes_part):
+            spin.setMinimumWidth(36)
+            spin.valueChanged.connect(self._value_changed)
+
+        self.summary = QLabel()
+        self.summary.setObjectName("muted")
+        self.summary.setWordWrap(True)
+        layout = QGridLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setHorizontalSpacing(4)
+        layout.setVerticalSpacing(2)
+        for column, (label, spin) in enumerate(
+            (("日", self.days), ("時間", self.hours), ("分", self.minutes_part))
+        ):
+            heading = QLabel(label)
+            heading.setObjectName("muted")
+            heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(heading, 0, column)
+            layout.addWidget(spin, 1, column)
+            layout.setColumnStretch(column, 1)
+        layout.addWidget(self.summary, 2, 0, 1, 3)
+        self.set_minutes(0)
+
+    def set_minutes(self, value: int) -> None:
+        total = max(0, min(int(value), self.maximum_minutes))
+        days, remaining = divmod(total, 24 * 60)
+        hours, minutes = divmod(remaining, 60)
+        self._updating = True
+        self.days.setValue(days)
+        self.hours.setValue(hours)
+        self.minutes_part.setValue(minutes)
+        self._updating = False
+        self._update_summary()
+
+    def minutes(self) -> int:
+        return min(
+            self.maximum_minutes,
+            self.days.value() * 24 * 60
+            + self.hours.value() * 60
+            + self.minutes_part.value(),
+        )
+
+    def _value_changed(self) -> None:
+        if self._updating:
+            return
+        raw_total = (
+            self.days.value() * 24 * 60
+            + self.hours.value() * 60
+            + self.minutes_part.value()
+        )
+        if raw_total > self.maximum_minutes:
+            self.set_minutes(self.maximum_minutes)
+            return
+        self._update_summary()
+
+    def _update_summary(self) -> None:
+        total = self.minutes()
+        if total == 0:
+            self.summary.setText(self.zero_text)
+            return
+        days, remaining = divmod(total, 24 * 60)
+        hours, minutes = divmod(remaining, 60)
+        parts = []
+        if days:
+            parts.append(f"{days}日")
+        if hours:
+            parts.append(f"{hours}時間")
+        if minutes:
+            parts.append(f"{minutes}分")
+        self.summary.setText(f"{' '.join(parts)}{self.suffix}")
+
+
 class ReminderControls(QFrame):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -229,28 +321,31 @@ class ReminderControls(QFrame):
         self.mode_combo.addItem("個別設定", "custom")
         self.mode_combo.addItem("通知しない", "off")
 
-        self.start_minutes = self._spin(1, 43200, " 分前")
-        self.interval_minutes = self._spin(0, 10080, " 分")
-        self.interval_minutes.setSpecialValueText("1回のみ")
-        self.final_window_minutes = self._spin(0, 10080, " 分前から")
-        self.final_window_minutes.setSpecialValueText("使用しない")
-        self.final_interval_minutes = self._spin(0, 1440, " 分")
-        self.final_interval_minutes.setSpecialValueText("使用しない")
+        self.start_duration = DurationInput(43200, "前", "1分以上を指定")
+        self.interval_duration = DurationInput(10080, "ごと", "1回のみ")
+        self.final_window_duration = DurationInput(10080, "前から", "使用しない")
+        self.final_interval_duration = DurationInput(1440, "ごと", "使用しない")
         self.previous_day = QCheckBox("前日の17時にも通知")
         self.work_start = self._spin(0, 23, " 時")
         self.work_end = self._spin(0, 23, " 時")
 
         self.custom_widget = QWidget()
-        custom_form = QFormLayout(self.custom_widget)
-        custom_form.setContentsMargins(0, 4, 0, 0)
-        custom_form.setSpacing(6)
-        custom_form.addRow("通知開始", self.start_minutes)
-        custom_form.addRow("通常間隔", self.interval_minutes)
-        custom_form.addRow("期限直前", self.final_window_minutes)
-        custom_form.addRow("直前間隔", self.final_interval_minutes)
-        custom_form.addRow("通知開始時刻", self.work_start)
-        custom_form.addRow("通知終了時刻", self.work_end)
-        custom_form.addRow("", self.previous_day)
+        custom_layout = QVBoxLayout(self.custom_widget)
+        custom_layout.setContentsMargins(0, 4, 0, 0)
+        custom_layout.setSpacing(5)
+        for label_text, widget in (
+            ("通知開始", self.start_duration),
+            ("通知間隔", self.interval_duration),
+            ("期限直前", self.final_window_duration),
+            ("直前間隔", self.final_interval_duration),
+            ("通知開始時刻", self.work_start),
+            ("通知終了時刻", self.work_end),
+        ):
+            field_label = QLabel(label_text)
+            field_label.setObjectName("fieldLabel")
+            custom_layout.addWidget(field_label)
+            custom_layout.addWidget(widget)
+        custom_layout.addWidget(self.previous_day)
 
         hint = QLabel(
             "日付だけの期限は当日15時から通知します。標準設定は重要度が高いほど通知間隔が短くなります。"
@@ -283,10 +378,12 @@ class ReminderControls(QFrame):
         self.mode_combo.setCurrentIndex(max(0, index))
         values = TaskService.default_reminder_config(priority)
         values.update(config or {})
-        self.start_minutes.setValue(int(values["start_minutes"]))
-        self.interval_minutes.setValue(int(values["interval_minutes"]))
-        self.final_window_minutes.setValue(int(values["final_window_minutes"]))
-        self.final_interval_minutes.setValue(int(values["final_interval_minutes"]))
+        self.start_duration.set_minutes(int(values["start_minutes"]))
+        self.interval_duration.set_minutes(int(values["interval_minutes"]))
+        self.final_window_duration.set_minutes(int(values["final_window_minutes"]))
+        self.final_interval_duration.set_minutes(
+            int(values["final_interval_minutes"])
+        )
         self.previous_day.setChecked(bool(values["previous_day_17"]))
         self.work_start.setValue(int(values["work_start_hour"]))
         self.work_end.setValue(int(values["work_end_hour"]))
@@ -300,10 +397,10 @@ class ReminderControls(QFrame):
 
     def config(self) -> dict[str, object]:
         return {
-            "start_minutes": self.start_minutes.value(),
-            "interval_minutes": self.interval_minutes.value(),
-            "final_window_minutes": self.final_window_minutes.value(),
-            "final_interval_minutes": self.final_interval_minutes.value(),
+            "start_minutes": self.start_duration.minutes(),
+            "interval_minutes": self.interval_duration.minutes(),
+            "final_window_minutes": self.final_window_duration.minutes(),
+            "final_interval_minutes": self.final_interval_duration.minutes(),
             "previous_day_17": self.previous_day.isChecked(),
             "work_start_hour": self.work_start.value(),
             "work_end_hour": self.work_end.value(),

@@ -33,7 +33,7 @@ class MainWindow(QMainWindow):
     hidden_to_tray = Signal()
 
     VIEW_TITLES = {
-        "today": "今日のタスク",
+        "today": "今日やる",
         "all": "すべてのタスク",
         "overdue": "期限切れ",
         "completed": "完了済み・取り消し",
@@ -121,6 +121,7 @@ class MainWindow(QMainWindow):
         self.table_page.permanent_delete_requested.connect(
             self._permanently_delete_task
         )
+        self.table_page.planned_today_requested.connect(self._set_planned_today)
         self.table_page.add_requested.connect(self._create_task)
         self.calendar_page.edit_requested.connect(self._edit_task)
         self.calendar_page.complete_requested.connect(self._complete_task)
@@ -135,7 +136,7 @@ class MainWindow(QMainWindow):
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(176)
         navigation = (
-            ("today", "▣  今日"),
+            ("today", "▣  今日やる"),
             ("all", "□  すべて"),
             ("overdue", "！  期限切れ"),
             ("completed", "✓  完了済み"),
@@ -251,6 +252,10 @@ class MainWindow(QMainWindow):
     def _restore_task(self, task_id: str) -> None:
         self.task_service.restore_task(task_id)
         self.refresh(task_id)
+
+    def _set_planned_today(self, task_id: str, enabled: bool) -> None:
+        self.task_service.set_planned_for_today(task_id, enabled)
+        self.refresh(task_id if enabled else None)
 
     def _trash_task(self, task_id: str) -> None:
         self.task_service.trash_task(task_id)

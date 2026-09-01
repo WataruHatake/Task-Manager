@@ -159,6 +159,38 @@ def test_task_views_and_restore(task_service):
     assert task_service.list_tasks_for_view("completed") == []
 
 
+def test_today_view_combines_manual_planning_and_tasks_due_today(task_service):
+    due_today = task_service.create_task(
+        TaskInput(title="本日期限", due_date=date.today(), due_time=time(23, 59))
+    )
+    manually_planned = task_service.create_task(
+        TaskInput(
+            title="今日やる",
+            due_date=date.today() + timedelta(days=5),
+            planned_for_date=date.today(),
+        )
+    )
+    not_today = task_service.create_task(
+        TaskInput(title="後日", due_date=date.today() + timedelta(days=5))
+    )
+
+    assert {task.id for task in task_service.list_tasks_for_view("today")} == {
+        due_today.id,
+        manually_planned.id,
+    }
+
+    task_service.set_planned_for_today(manually_planned.id, False)
+    assert {task.id for task in task_service.list_tasks_for_view("today")} == {
+        due_today.id
+    }
+
+    task_service.set_planned_for_today(not_today.id, True)
+    assert {task.id for task in task_service.list_tasks_for_view("today")} == {
+        due_today.id,
+        not_today.id,
+    }
+
+
 def test_trash_restore_and_permanent_delete(task_service):
     task = task_service.create_task(TaskInput(title="削除対象"))
 

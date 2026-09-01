@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from dandori.domain.enums import Priority, TaskStatus
@@ -65,6 +65,7 @@ class Task(Base):
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=int(Priority.NORMAL))
     due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     due_has_time: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    planned_for_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     category_id: Mapped[str] = mapped_column(ForeignKey("categories.id"), nullable=False)
     recurrence_group_id: Mapped[str | None] = mapped_column(
         ForeignKey("recurrence_groups.id"), nullable=True

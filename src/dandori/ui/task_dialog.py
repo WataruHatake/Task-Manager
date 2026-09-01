@@ -105,6 +105,10 @@ class TaskDialog(QDialog):
         self.due_date_edit.setDate(QDate(base_date.year, base_date.month, base_date.day))
         self.due_time_edit = TimeComboBox()
         self.due_time_edit.set_time(time(17, 0))
+        self.planned_today = QCheckBox("今日やる")
+        self.planned_today.setToolTip(
+            "期限とは別に今日の作業対象へ追加します。本日期限のタスクは自動的に表示されます。"
+        )
 
         self.retention_controls = RetentionControls()
         self.reminder_controls = ReminderControls()
@@ -157,6 +161,7 @@ class TaskDialog(QDialog):
         form.addRow("状態", self.status_combo)
         form.addRow("重要度", self.priority_combo)
         form.addRow("カテゴリ", category_row)
+        form.addRow("今日の作業", self.planned_today)
         form.addRow("期限", self.due_mode)
         form.addRow("期限日", self.due_date_edit)
         form.addRow("期限時刻", self.due_time_edit)
@@ -240,6 +245,9 @@ class TaskDialog(QDialog):
                     )
                     if initial_input.due_time is not None:
                         self.due_time_edit.set_time(initial_input.due_time)
+                self.planned_today.setChecked(
+                    initial_input.planned_for_date == date.today()
+                )
                 self.retention_controls.set_value(initial_input.retention_days)
                 self.reminder_controls.set_values(
                     initial_input.reminder_mode,
@@ -259,6 +267,7 @@ class TaskDialog(QDialog):
         self.status_combo.setCurrentIndex(self.status_combo.findData(task.status_enum))
         self.priority_combo.setCurrentIndex(self.priority_combo.findData(task.priority_enum))
         self.category_combo.setCurrentIndex(self.category_combo.findData(task.category_id))
+        self.planned_today.setChecked(task.planned_for_date == date.today())
         self.retention_controls.set_value(task.retention_days)
         self.reminder_controls.set_values(
             task.reminder_mode,
@@ -317,6 +326,7 @@ class TaskDialog(QDialog):
             priority=Priority(int(self.priority_combo.currentData())),
             due_date=due_date_value,
             due_time=due_time_value,
+            planned_for_date=date.today() if self.planned_today.isChecked() else None,
             category_id=self.category_combo.currentData(),
             retention_days=self.retention_controls.value(),
             reminder_mode=self.reminder_controls.mode(),
@@ -383,6 +393,7 @@ class TaskDialog(QDialog):
             self.status_combo.currentData(),
             self.priority_combo.currentData(),
             self.category_combo.currentData(),
+            self.planned_today.isChecked(),
             self.due_mode.currentData(),
             self.due_date_edit.date().toString("yyyy-MM-dd"),
             self.due_time_edit.currentText(),

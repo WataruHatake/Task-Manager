@@ -11,6 +11,7 @@ from dandori.ui.calendar_page import CalendarPage
 from dandori.ui.edge_windows import EdgeAddWindow, EdgeTaskWindow
 from dandori.ui.main_window import MainWindow
 from dandori.ui.task_dialog import TaskDialog
+from dandori.ui.task_extras import DurationInput, ReminderControls
 from dandori.ui.theme_dialog import ThemeDialog
 from dandori.ui.time_combo import TimeComboBox
 
@@ -86,7 +87,7 @@ def test_main_navigation_matches_task_views_and_can_restore(qtbot, task_service)
     window = MainWindow(task_service)
     qtbot.addWidget(window)
 
-    assert window.page_title.text() == "今日のタスク"
+    assert window.page_title.text() == "今日やる"
     assert window.table_page.table.rowCount() == 1
 
     window.nav_buttons["all"].click()
@@ -219,6 +220,7 @@ def test_edge_task_editor_updates_all_task_fields_inline(qtbot, task_service):
     editor.category_combo.setCurrentIndex(
         editor.category_combo.findData(category.id)
     )
+    editor.planned_today.setChecked(True)
     editor.due_mode.setCurrentIndex(editor.due_mode.findData("datetime"))
     editor.due_date_edit.setDate(QDate(2026, 9, 8))
     editor.due_time_edit.set_time(time(15, 30))
@@ -233,6 +235,7 @@ def test_edge_task_editor_updates_all_task_fields_inline(qtbot, task_service):
     assert updated.status_enum is TaskStatus.ON_HOLD
     assert updated.priority_enum is Priority.CRITICAL
     assert updated.category_id == category.id
+    assert updated.planned_for_date == date.today()
     assert updated.due_at.date() == date(2026, 9, 8)
     assert updated.due_at.time() == time(15, 30)
     assert task_window.stack.currentWidget() is task_window.detail
@@ -329,6 +332,83 @@ def test_task_dialog_edits_reminder_and_retention(qtbot, task_service):
     updated = task_service.get_task(task.id)
     assert updated.reminder_mode == "off"
     assert updated.retention_days == 90
+
+
+def test_duration_input_displays_minutes_as_days_hours_and_minutes(qtbot):
+    duration = DurationInput(43200, "前", "1分以上を指定")
+    qtbot.addWidget(duration)
+
+    duration.set_minutes(1440)
+    assert (duration.days.value(), duration.hours.value(), duration.minutes_part.value()) == (
+        1,
+        0,
+        0,
+    )
+    assert duration.summary.text() == "1日前"
+
+    duration.set_minutes(1000)
+    assert (duration.days.value(), duration.hours.value(), duration.minutes_part.value()) == (
+        0,
+        16,
+        40,
+    )
+    assert duration.summary.text() == "16時間 40分前"
+    assert duration.minutes() == 1000
+
+
+def test_reminder_controls_keep_existing_minute_values(qtbot):
+    controls = ReminderControls()
+    qtbot.addWidget(controls)
+    existing = {
+        "start_minutes": 1000,
+        "interval_minutes": 90,
+        "final_window_minutes": 180,
+        "final_interval_minutes": 10,
+        "previous_day_17": True,
+        "work_start_hour": 9,
+        "work_end_hour": 17,
+    }
+
+    controls.set_values("custom", existing)
+
+    assert controls.config() == existing
+    assert controls.start_duration.summary.text() == "16時間 40分前"
+    assert controls.interval_duration.summary.text() == "1時間 30分ごと"
+    assert controls.final_window_duration.summary.text() == "3時間前から"
+    assert controls.final_interval_duration.summary.text() == "10分ごと"
+
+
+def test_today_button_adds_future_task_and_due_today_is_forced(qtbot, task_service):
+    future = task_service.create_task(
+        TaskInput(title="今日進める", due_date=date.today() + timedelta(days=3))
+    )
+    due_today = task_service.create_task(
+        TaskInput(title="本日期限", due_date=date.today())
+    )
+    window = MainWindow(task_service)
+    qtbot.addWidget(window)
+    window.nav_buttons["all"].click()
+    window.refresh(future.id)
+
+    window.table_page.detail.today_button.click()
+    window.nav_buttons["today"].click()
+
+    assert {task.id for task in window.table_page.tasks} == {future.id, due_today.id}
+    window.refresh(due_today.id)
+    assert window.table_page.detail.today_button.text() == "本日期限（今日に表示）"
+    assert not window.table_page.detail.today_button.isEnabled()
+
+
+def test_quick_add_can_mark_task_for_today(qtbot, task_service):
+    add_window = EdgeAddWindow(task_service)
+    qtbot.addWidget(add_window)
+    add_window.title_edit.setText("クイック今日やる")
+    add_window.planned_today.setChecked(True)
+
+    add_window._create()
+
+    saved = task_service.list_active_tasks()[0]
+    assert saved.planned_for_date == date.today()
 
 
 def test_task_dialog_can_apply_recurring_edits_to_group(qtbot, task_service):

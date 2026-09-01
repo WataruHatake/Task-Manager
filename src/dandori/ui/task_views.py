@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -37,6 +39,7 @@ class TaskDetailWidget(QFrame):
     trash_requested = Signal(str)
     restore_trash_requested = Signal(str)
     permanent_delete_requested = Signal(str)
+    planned_today_requested = Signal(str, bool)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -69,11 +72,13 @@ class TaskDetailWidget(QFrame):
         self.purge_value = QLabel("—")
 
         self.edit_button = QPushButton("編集")
+        self.today_button = QPushButton("今日やる")
         self.complete_button = QPushButton("完了")
         self.complete_button.setObjectName("primaryButton")
         self.delete_button = QPushButton("ゴミ箱へ")
         self.delete_button.setObjectName("dangerButton")
         self.edit_button.clicked.connect(self._emit_edit)
+        self.today_button.clicked.connect(self._emit_planned_today)
         self.complete_button.clicked.connect(self._emit_primary_action)
         self.delete_button.clicked.connect(self._emit_delete_action)
 
@@ -114,6 +119,7 @@ class TaskDetailWidget(QFrame):
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(7)
         layout.addWidget(scroll, 1)
+        layout.addWidget(self.today_button)
         layout.addLayout(actions)
         layout.addWidget(self.delete_button)
         self.set_task(None)
@@ -139,6 +145,7 @@ class TaskDetailWidget(QFrame):
         self.complete_button.setEnabled(enabled)
         self.delete_button.setEnabled(enabled)
         self.edit_button.setVisible(not trashed)
+        self.today_button.setVisible(bool(task) and not trashed and not terminal)
         if trashed:
             self.complete_button.setText("復元")
             self.delete_button.setText("完全に削除")
@@ -167,6 +174,14 @@ class TaskDetailWidget(QFrame):
             self.purge_value.hide()
             self.progress_bar.setValue(0)
             return
+        due_today = bool(task.due_at and task.due_at.date() == date.today())
+        planned_today = task.planned_for_date == date.today()
+        if due_today:
+            self.today_button.setText("本日期限（今日に表示）")
+            self.today_button.setEnabled(False)
+        else:
+            self.today_button.setText("今日から外す" if planned_today else "今日やる")
+            self.today_button.setEnabled(True)
         self.title_label.setText(task.title)
         self.status_value.setText(task.status_enum.label)
         self.progress_bar.setValue(task.progress_percent)
@@ -217,6 +232,18 @@ class TaskDetailWidget(QFrame):
         else:
             self.complete_requested.emit(self._task.id)
 
+    def _emit_planned_today(self) -> None:
+        if self._task is None:
+            return
+        due_today = bool(
+            self._task.due_at and self._task.due_at.date() == date.today()
+        )
+        if not due_today:
+            self.planned_today_requested.emit(
+                self._task.id,
+                self._task.planned_for_date != date.today(),
+            )
+
     def _emit_delete_action(self) -> None:
         if self._task is None:
             return
@@ -234,6 +261,7 @@ class TaskTablePage(QWidget):
     trash_requested = Signal(str)
     restore_trash_requested = Signal(str)
     permanent_delete_requested = Signal(str)
+    planned_today_requested = Signal(str, bool)
     add_requested = Signal()
 
     HEADERS = ("タスク", "状態", "進捗", "重要度", "期限", "カテゴリ")
@@ -300,6 +328,7 @@ class TaskTablePage(QWidget):
         self.detail.permanent_delete_requested.connect(
             self.permanent_delete_requested
         )
+        self.detail.planned_today_requested.connect(self.planned_today_requested)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(table_surface)
@@ -354,8 +383,8 @@ class TaskTablePage(QWidget):
         )
         messages = {
             "today": (
-                "今日のタスクはありません",
-                "今日対応するタスクを追加できます。",
+                "今日やるタスクはありません",
+                "「今日やる」に指定したタスクと本日期限のタスクが表示されます。",
                 True,
             ),
             "all": (

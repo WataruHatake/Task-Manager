@@ -86,6 +86,7 @@ class TaskInput:
     priority: Priority = Priority.NORMAL
     due_date: date | None = None
     due_time: time | None = None
+    planned_for_date: date | None = None
     category_id: str | None = None
     retention_days: int | None = 365
     reminder_mode: str = "priority"
@@ -353,7 +354,8 @@ class TaskService:
             return [
                 task
                 for task in tasks
-                if task.due_at is not None and task.due_at.date() == now.date()
+                if task.planned_for_date == now.date()
+                or (task.due_at is not None and task.due_at.date() == now.date())
             ]
         if view == "overdue":
             return [
@@ -397,6 +399,7 @@ class TaskService:
             priority=int(task_input.priority),
             due_at=due_at,
             due_has_time=due_has_time,
+            planned_for_date=task_input.planned_for_date,
             category_id=category_id,
             retention_days=retention_days,
             reminder_mode=reminder_mode,
@@ -443,6 +446,7 @@ class TaskService:
             task.priority = int(task_input.priority)
             task.due_at = due_at
             task.due_has_time = due_has_time
+            task.planned_for_date = task_input.planned_for_date
             task.category_id = task_input.category_id or self.default_category().id
             task.retention_days = retention_days
             task.reminder_mode = reminder_mode
@@ -521,6 +525,7 @@ class TaskService:
                     priority=int(task_input.priority),
                     due_at=due_at,
                     due_has_time=due_has_time,
+                    planned_for_date=task_input.planned_for_date,
                     category_id=category_id,
                     recurrence_group_id=group.id,
                     retention_days=retention_days,
@@ -670,6 +675,33 @@ class TaskService:
             session.commit()
             session.refresh(subtask)
             return subtask
+
+    def set_planned_for_today(self, task_id: str, enabled: bool) -> Task:
+        task = self.get_task(task_id)
+        if task is None:
+            raise LookupError("タスクが見つかりません。")
+        return self.update_task(
+            task_id,
+            TaskInput(
+                title=task.title,
+                memo=task.memo,
+                progress_note=task.progress_note,
+                progress_percent=task.progress_percent,
+                status=task.status_enum,
+                priority=task.priority_enum,
+                due_date=task.due_at.date() if task.due_at else None,
+                due_time=(
+                    task.due_at.time()
+                    if task.due_at is not None and task.due_has_time
+                    else None
+                ),
+                planned_for_date=local_now().date() if enabled else None,
+                category_id=task.category_id,
+                retention_days=task.retention_days,
+                reminder_mode=task.reminder_mode,
+                reminder_config=self._reminder_json(task),
+            ),
+        )
 
     def add_attachment(self, task_id: str, source: str | Path) -> Attachment:
         source_path = Path(source).expanduser().resolve()
@@ -883,6 +915,7 @@ class TaskService:
                 priority=task.priority_enum,
                 due_date=task.due_at.date() if task.due_at else None,
                 due_time=task.due_at.time() if task.due_at and task.due_has_time else None,
+                planned_for_date=task.planned_for_date,
                 category_id=task.category_id,
                 retention_days=task.retention_days,
                 reminder_mode=task.reminder_mode,
@@ -905,6 +938,7 @@ class TaskService:
                 priority=task.priority_enum,
                 due_date=task.due_at.date() if task.due_at else None,
                 due_time=task.due_at.time() if task.due_at and task.due_has_time else None,
+                planned_for_date=task.planned_for_date,
                 category_id=task.category_id,
                 retention_days=task.retention_days,
                 reminder_mode=task.reminder_mode,
@@ -1091,6 +1125,9 @@ class TaskService:
             "priority": task.priority,
             "due_at": task.due_at.isoformat() if task.due_at else None,
             "due_has_time": task.due_has_time,
+            "planned_for_date": (
+                task.planned_for_date.isoformat() if task.planned_for_date else None
+            ),
             "category_id": task.category_id,
             "recurrence_group_id": task.recurrence_group_id,
             "retention_days": task.retention_days,

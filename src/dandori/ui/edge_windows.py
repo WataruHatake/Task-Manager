@@ -60,6 +60,7 @@ class EdgeTaskDetail(QWidget):
     edit_requested = Signal(str)
     complete_requested = Signal(str)
     restore_requested = Signal(str)
+    planned_today_requested = Signal(str, bool)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -121,9 +122,11 @@ class EdgeTaskDetail(QWidget):
         scroll.setWidget(content)
 
         self.edit_button = QPushButton("編集")
+        self.today_button = QPushButton("今日やる")
         self.primary_button = QPushButton("完了")
         self.primary_button.setObjectName("primaryButton")
         self.edit_button.clicked.connect(self._edit)
+        self.today_button.clicked.connect(self._planned_today)
         self.primary_button.clicked.connect(self._primary_action)
         actions = QHBoxLayout()
         actions.setSpacing(5)
@@ -135,6 +138,7 @@ class EdgeTaskDetail(QWidget):
         layout.setSpacing(8)
         layout.addWidget(back_button)
         layout.addWidget(scroll, 1)
+        layout.addWidget(self.today_button)
         layout.addLayout(actions)
 
     def set_task(self, task: Task) -> None:
@@ -166,6 +170,15 @@ class EdgeTaskDetail(QWidget):
         )
         terminal = task.status_enum in (TaskStatus.COMPLETED, TaskStatus.CANCELLED)
         self.primary_button.setText("元に戻す" if terminal else "完了")
+        self.today_button.setVisible(not terminal)
+        due_today = bool(task.due_at and task.due_at.date() == date.today())
+        planned_today = task.planned_for_date == date.today()
+        if due_today:
+            self.today_button.setText("本日期限（今日に表示）")
+            self.today_button.setEnabled(False)
+        else:
+            self.today_button.setText("今日から外す" if planned_today else "今日やる")
+            self.today_button.setEnabled(True)
 
     def _edit(self) -> None:
         if self.task:
@@ -178,6 +191,16 @@ class EdgeTaskDetail(QWidget):
             self.restore_requested.emit(self.task.id)
         else:
             self.complete_requested.emit(self.task.id)
+
+    def _planned_today(self) -> None:
+        if self.task is None:
+            return
+        due_today = bool(self.task.due_at and self.task.due_at.date() == date.today())
+        if not due_today:
+            self.planned_today_requested.emit(
+                self.task.id,
+                self.task.planned_for_date != date.today(),
+            )
 
 
 class EdgeTaskEditor(QWidget):
@@ -234,6 +257,10 @@ class EdgeTaskEditor(QWidget):
         self.due_date_edit.setDisplayFormat("yyyy/MM/dd")
         self.due_time_edit = TimeComboBox()
         self.due_time_edit.set_time(time(17, 0))
+        self.planned_today = QCheckBox("今日やる")
+        self.planned_today.setToolTip(
+            "期限とは別に今日の作業対象へ追加します。本日期限は自動的に表示されます。"
+        )
         self.reminder_controls = ReminderControls()
         self.retention_controls = RetentionControls()
         self.subtask_editor = SubtaskEditor()
@@ -257,6 +284,7 @@ class EdgeTaskEditor(QWidget):
         form.addWidget(self.priority_combo)
         form.addWidget(self._field_label("カテゴリ"))
         form.addLayout(category_row)
+        form.addWidget(self.planned_today)
         form.addWidget(self._field_label("期限"))
         form.addWidget(self.due_mode)
         self.due_date_label = self._field_label("期限日")
@@ -328,6 +356,7 @@ class EdgeTaskEditor(QWidget):
             self.priority_combo.findData(task.priority_enum)
         )
         self._reload_categories(task.category_id)
+        self.planned_today.setChecked(task.planned_for_date == date.today())
         self.retention_controls.set_value(task.retention_days)
         self.reminder_controls.set_values(
             task.reminder_mode,
@@ -402,6 +431,7 @@ class EdgeTaskEditor(QWidget):
             priority=Priority(int(self.priority_combo.currentData())),
             due_date=due_date_value,
             due_time=due_time_value,
+            planned_for_date=date.today() if self.planned_today.isChecked() else None,
             category_id=self.category_combo.currentData(),
             retention_days=self.retention_controls.value(),
             reminder_mode=self.reminder_controls.mode(),
@@ -435,6 +465,7 @@ class EdgeTaskEditor(QWidget):
             self.status_combo.currentData(),
             self.priority_combo.currentData(),
             self.category_combo.currentData(),
+            self.planned_today.isChecked(),
             self.due_mode.currentData(),
             self.due_date_edit.date().toString("yyyy-MM-dd"),
             self.due_time_edit.currentText(),
@@ -575,6 +606,7 @@ class EdgeTaskWindow(EdgeWindowBase):
         self.detail.edit_requested.connect(self._edit)
         self.detail.complete_requested.connect(self._complete)
         self.detail.restore_requested.connect(self._restore)
+        self.detail.planned_today_requested.connect(self._set_planned_today)
         self.editor = EdgeTaskEditor(self.task_service)
         self.editor.saved.connect(self._editor_saved)
         self.editor.cancel_requested.connect(self._editor_cancelled)
@@ -618,30 +650,37 @@ class EdgeTaskWindow(EdgeWindowBase):
             return
 
         now = local_now()
+        today_tasks = [
+            task
+            for task in tasks
+            if task.planned_for_date == now.date()
+            or (task.due_at is not None and task.due_at.date() == now.date())
+        ]
+        today_ids = {task.id for task in today_tasks}
         groups: tuple[tuple[str, list[Task]], ...] = (
             (
                 "期限切れ",
-                [task for task in tasks if task.due_at and task.due_at < now],
-            ),
-            (
-                "今日",
                 [
                     task
                     for task in tasks
-                    if task.due_at
-                    and task.due_at >= now
-                    and task.due_at.date() == now.date()
+                    if task.id not in today_ids and task.due_at and task.due_at < now
                 ],
             ),
+            ("今日やる", today_tasks),
             (
                 "今後",
                 [
                     task
                     for task in tasks
-                    if task.due_at and task.due_at.date() > now.date()
+                    if task.id not in today_ids
+                    and task.due_at
+                    and task.due_at.date() > now.date()
                 ],
             ),
-            ("期限なし", [task for task in tasks if task.due_at is None]),
+            (
+                "期限なし",
+                [task for task in tasks if task.id not in today_ids and task.due_at is None],
+            ),
         )
         for heading, grouped_tasks in groups:
             if not grouped_tasks:
@@ -706,6 +745,12 @@ class EdgeTaskWindow(EdgeWindowBase):
         self.refresh()
         self.tasks_changed.emit()
 
+    def _set_planned_today(self, task_id: str, enabled: bool) -> None:
+        self.task_service.set_planned_for_today(task_id, enabled)
+        self.refresh()
+        self.tasks_changed.emit()
+        self._show_task(task_id)
+
     def _show_list(self) -> None:
         self.stack.setCurrentIndex(0)
 
@@ -764,6 +809,10 @@ class EdgeAddWindow(EdgeWindowBase):
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText("タスク名")
         self.title_edit.returnPressed.connect(self._create)
+        self.planned_today = QCheckBox("今日やる")
+        self.planned_today.setToolTip(
+            "期限とは別に今日の作業対象へ追加します。本日期限は自動的に表示されます。"
+        )
         self.due_enabled = QCheckBox("期限を設定")
         self.due_date = QDateEdit(QDate.currentDate())
         self.due_date.setCalendarPopup(True)
@@ -791,6 +840,7 @@ class EdgeAddWindow(EdgeWindowBase):
         form.setSpacing(6)
         form.addWidget(self._field_label("タスク名"))
         form.addWidget(self.title_edit)
+        form.addWidget(self.planned_today)
         form.addWidget(self.due_enabled)
         self.due_date_label = self._field_label("期限日")
         form.addWidget(self.due_date_label)
@@ -887,6 +937,7 @@ class EdgeAddWindow(EdgeWindowBase):
             priority=Priority(int(self.priority.currentData())),
             due_date=due_date_value,
             due_time=due_time_value,
+            planned_for_date=date.today() if self.planned_today.isChecked() else None,
             category_id=self.category.currentData(),
         )
 
@@ -913,6 +964,7 @@ class EdgeAddWindow(EdgeWindowBase):
 
     def _reset_form(self) -> None:
         self.title_edit.clear()
+        self.planned_today.setChecked(False)
         self.due_enabled.setChecked(False)
         self.due_date.setDate(QDate.currentDate())
         self.due_time.set_time(time(17, 0))
