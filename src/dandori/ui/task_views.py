@@ -61,6 +61,11 @@ class TaskDetailWidget(QFrame):
         self.memo_value = QLabel("—")
         self.memo_value.setWordWrap(True)
         self.subtask_value = QLabel("—")
+        self.subtask_value.setWordWrap(True)
+        self.attachment_value = QLabel("—")
+        self.attachment_value.setWordWrap(True)
+        self.reminder_value = QLabel("—")
+        self.retention_value = QLabel("—")
         self.purge_value = QLabel("—")
 
         self.edit_button = QPushButton("編集")
@@ -87,6 +92,9 @@ class TaskDetailWidget(QFrame):
         self.subtask_field_label = self._add_field(
             content_layout, "サブタスク", self.subtask_value
         )
+        self._add_field(content_layout, "添付ファイル", self.attachment_value)
+        self._add_field(content_layout, "リマインド", self.reminder_value)
+        self._add_field(content_layout, "完了後の保存", self.retention_value)
         self.purge_field_label = self._add_field(
             content_layout, "自動削除", self.purge_value
         )
@@ -147,6 +155,9 @@ class TaskDetailWidget(QFrame):
                 self.category_value,
                 self.memo_value,
                 self.subtask_value,
+                self.attachment_value,
+                self.reminder_value,
+                self.retention_value,
                 self.purge_value,
             ):
                 label.setText("—")
@@ -165,9 +176,27 @@ class TaskDetailWidget(QFrame):
         self.category_value.setText(task.category.name)
         self.memo_value.setText(task.memo or "メモなし")
         completed = sum(1 for subtask in task.subtasks if subtask.completed)
-        self.subtask_value.setText(f"{completed}/{len(task.subtasks)}" if task.subtasks else "なし")
+        subtask_lines = [f"{completed}/{len(task.subtasks)} 完了"] if task.subtasks else []
+        subtask_lines.extend(
+            f"{'✓' if subtask.completed else '○'} {subtask.title}"
+            for subtask in sorted(task.subtasks, key=lambda item: item.position)
+        )
+        self.subtask_value.setText("\n".join(subtask_lines) or "なし")
         self.subtask_field_label.setVisible(bool(task.subtasks))
         self.subtask_value.setVisible(bool(task.subtasks))
+        self.attachment_value.setText(
+            "\n".join(item.original_name for item in task.attachments) or "なし"
+        )
+        self.reminder_value.setText(
+            {
+                "priority": "重要度の標準設定",
+                "custom": "個別設定",
+                "off": "通知しない",
+            }.get(task.reminder_mode, "重要度の標準設定")
+        )
+        self.retention_value.setText(
+            "無期限" if task.retention_days is None else f"{task.retention_days}日"
+        )
         self.purge_value.setText(
             task.purge_at.strftime("%Y/%m/%d") if task.purge_at else "—"
         )

@@ -30,7 +30,9 @@ def test_runtime_routes_shortcut_and_tray_click_to_main(qtbot, qapp, tmp_path):
 
     assert runtime.main_window.isVisible()
     assert runtime.trash_purge_timer.isActive()
+    assert runtime.reminder_timer.isActive()
     runtime.trash_purge_timer.stop()
+    runtime.reminder_timer.stop()
     runtime.hotkeys.stop()
     runtime.database.dispose()
 

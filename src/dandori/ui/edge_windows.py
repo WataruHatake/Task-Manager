@@ -30,6 +30,12 @@ from dandori.infrastructure.models import Task, local_now
 from dandori.services.task_service import TaskInput, TaskService
 from dandori.ui.category_dialog import CategoryManagerDialog
 from dandori.ui.task_dialog import TaskDialog
+from dandori.ui.task_extras import (
+    AttachmentEditor,
+    ReminderControls,
+    RetentionControls,
+    SubtaskEditor,
+)
 from dandori.ui.task_views import format_due
 from dandori.ui.time_combo import TimeComboBox
 from dandori.ui.undo_bar import UndoBar
@@ -77,6 +83,12 @@ class EdgeTaskDetail(QWidget):
         self.category = QLabel()
         self.memo = QLabel()
         self.memo.setWordWrap(True)
+        self.subtasks = QLabel()
+        self.subtasks.setWordWrap(True)
+        self.attachments = QLabel()
+        self.attachments.setWordWrap(True)
+        self.reminder = QLabel()
+        self.reminder.setWordWrap(True)
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
@@ -91,6 +103,9 @@ class EdgeTaskDetail(QWidget):
             ("重要度", self.priority),
             ("カテゴリ", self.category),
             ("メモ", self.memo),
+            ("サブタスク", self.subtasks),
+            ("添付ファイル", self.attachments),
+            ("リマインド", self.reminder),
         ):
             field = QLabel(label)
             field.setObjectName("fieldLabel")
@@ -132,6 +147,23 @@ class EdgeTaskDetail(QWidget):
         self.priority.setText(task.priority_enum.label)
         self.category.setText(task.category.name)
         self.memo.setText(task.memo or "メモなし")
+        completed = sum(1 for item in task.subtasks if item.completed)
+        subtask_lines = [f"{completed}/{len(task.subtasks)} 完了"] if task.subtasks else []
+        subtask_lines.extend(
+            f"{'✓' if item.completed else '○'} {item.title}"
+            for item in sorted(task.subtasks, key=lambda value: value.position)
+        )
+        self.subtasks.setText("\n".join(subtask_lines) or "なし")
+        self.attachments.setText(
+            "\n".join(item.original_name for item in task.attachments) or "なし"
+        )
+        self.reminder.setText(
+            {
+                "priority": "重要度の標準設定",
+                "custom": "個別設定",
+                "off": "通知しない",
+            }.get(task.reminder_mode, "重要度の標準設定")
+        )
         terminal = task.status_enum in (TaskStatus.COMPLETED, TaskStatus.CANCELLED)
         self.primary_button.setText("元に戻す" if terminal else "完了")
 
@@ -202,6 +234,10 @@ class EdgeTaskEditor(QWidget):
         self.due_date_edit.setDisplayFormat("yyyy/MM/dd")
         self.due_time_edit = TimeComboBox()
         self.due_time_edit.set_time(time(17, 0))
+        self.reminder_controls = ReminderControls()
+        self.retention_controls = RetentionControls()
+        self.subtask_editor = SubtaskEditor()
+        self.attachment_editor = AttachmentEditor(task_service)
 
         form_widget = QWidget()
         form = QVBoxLayout(form_widget)
@@ -229,6 +265,14 @@ class EdgeTaskEditor(QWidget):
         self.due_time_label = self._field_label("期限時刻")
         form.addWidget(self.due_time_label)
         form.addWidget(self.due_time_edit)
+        form.addWidget(self._field_label("リマインド"))
+        form.addWidget(self.reminder_controls)
+        form.addWidget(self._field_label("完了後の保存"))
+        form.addWidget(self.retention_controls)
+        form.addWidget(self._field_label("サブタスク"))
+        form.addWidget(self.subtask_editor)
+        form.addWidget(self._field_label("添付ファイル"))
+        form.addWidget(self.attachment_editor)
         form.addStretch()
 
         scroll = QScrollArea()
@@ -272,6 +316,7 @@ class EdgeTaskEditor(QWidget):
 
     def set_task(self, task: Task) -> None:
         self.task = task
+        self.attachment_editor.set_task(task)
         self.title_edit.setText(task.title)
         self.memo_edit.setPlainText(task.memo)
         self.progress_note_edit.setPlainText(task.progress_note)
@@ -283,6 +328,13 @@ class EdgeTaskEditor(QWidget):
             self.priority_combo.findData(task.priority_enum)
         )
         self._reload_categories(task.category_id)
+        self.retention_controls.set_value(task.retention_days)
+        self.reminder_controls.set_values(
+            task.reminder_mode,
+            self.task_service._reminder_json(task),
+            task.priority_enum,
+        )
+        self.subtask_editor.set_subtasks(task.subtasks)
         if task.due_at:
             self.due_date_edit.setDate(
                 QDate(task.due_at.year, task.due_at.month, task.due_at.day)
@@ -351,6 +403,9 @@ class EdgeTaskEditor(QWidget):
             due_date=due_date_value,
             due_time=due_time_value,
             category_id=self.category_combo.currentData(),
+            retention_days=self.retention_controls.value(),
+            reminder_mode=self.reminder_controls.mode(),
+            reminder_config=self.reminder_controls.config(),
         )
 
     def _save(self) -> None:
@@ -360,6 +415,11 @@ class EdgeTaskEditor(QWidget):
             self.task = self.task_service.update_task(
                 self.task.id, self._task_input()
             )
+            self.task_service.replace_subtasks(
+                self.task.id, self.subtask_editor.inputs()
+            )
+            self.attachment_editor.apply([self.task.id])
+            self.task = self.task_service.get_task(self.task.id)
         except (ValueError, LookupError) as error:
             QMessageBox.warning(self, "保存できません", str(error))
             return
@@ -378,6 +438,10 @@ class EdgeTaskEditor(QWidget):
             self.due_mode.currentData(),
             self.due_date_edit.date().toString("yyyy-MM-dd"),
             self.due_time_edit.currentText(),
+            self.retention_controls.state(),
+            self.reminder_controls.state(),
+            self.subtask_editor.state(),
+            self.attachment_editor.state(),
         )
 
     def has_unsaved_changes(self) -> bool:

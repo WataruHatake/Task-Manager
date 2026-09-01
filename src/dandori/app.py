@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, Slot
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from dandori.infrastructure.config import AppPaths
@@ -54,7 +54,9 @@ class DandoriRuntime(QObject):
         self.database = Database(paths.database_file)
         self.database.initialize()
         self.task_service = TaskService(self.database)
+        self.task_service.archive_expired_completed_tasks()
         self.task_service.purge_expired_tasks()
+        self.task_service.rebuild_all_reminders()
         self.single_instance = single_instance
         theme_setting = self.task_service.get_setting("theme", {})
         if not isinstance(theme_setting, dict):
@@ -67,6 +69,9 @@ class DandoriRuntime(QObject):
         self.edge_add = EdgeAddWindow(self.task_service)
         self.tray_icon: QSystemTrayIcon | None = None
         self.tray_add_action: QAction | None = None
+        self.last_reminder_task_id: str | None = None
+        self.snooze_actions: list[QAction] = []
+        self.complete_reminder_action: QAction | None = None
 
         icon = self._update_icons()
 
@@ -92,6 +97,11 @@ class DandoriRuntime(QObject):
         self.trash_purge_timer.setInterval(60 * 60 * 1000)
         self.trash_purge_timer.timeout.connect(self._purge_expired_trash)
         self.trash_purge_timer.start()
+        self.reminder_timer = QTimer(self)
+        self.reminder_timer.setInterval(30 * 1000)
+        self.reminder_timer.timeout.connect(self._check_reminders)
+        self.reminder_timer.start()
+        self._check_reminders()
 
     def _update_icons(self) -> QIcon:
         accent, foreground = theme_accent_colors(self.palette_key, self.appearance)
@@ -117,10 +127,37 @@ class DandoriRuntime(QObject):
         )
         menu.addAction("タスク表示    Ctrl+Alt+T", self.show_edge_tasks)
         menu.addAction("カラーテーマ", self.show_theme_settings)
+        notification_menu = menu.addMenu("通知表示時間")
+        timeout_group = QActionGroup(notification_menu)
+        timeout_group.setExclusive(True)
+        current_timeout = int(
+            self.task_service.get_setting("notification_timeout_seconds", 15)
+        )
+        for seconds, label in ((5, "5秒"), (15, "15秒"), (30, "30秒"), (60, "60秒")):
+            action = notification_menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(seconds == current_timeout)
+            action.triggered.connect(
+                lambda _checked=False, value=seconds: self.task_service.set_setting(
+                    "notification_timeout_seconds", value
+                )
+            )
+            timeout_group.addAction(action)
+        menu.addSeparator()
+        snooze_10 = menu.addAction("最後の通知を10分後に再通知")
+        snooze_10.triggered.connect(lambda: self._snooze_last_reminder(10))
+        snooze_60 = menu.addAction("最後の通知を1時間後に再通知")
+        snooze_60.triggered.connect(lambda: self._snooze_last_reminder(60))
+        self.snooze_actions = [snooze_10, snooze_60]
+        self.complete_reminder_action = menu.addAction("最後に通知したタスクを完了")
+        self.complete_reminder_action.triggered.connect(self._complete_last_reminder)
+        for action in (*self.snooze_actions, self.complete_reminder_action):
+            action.setEnabled(False)
         menu.addSeparator()
         menu.addAction("完全終了", self.quit)
         self.tray_icon.setContextMenu(menu)
         self.tray_icon.activated.connect(self._tray_activated)
+        self.tray_icon.messageClicked.connect(self._notification_clicked)
         self.tray_icon.show()
         self.main_window.hide_to_tray = True
 
@@ -143,10 +180,13 @@ class DandoriRuntime(QObject):
         apply_theme(self.application, self.palette_key, self.appearance)
         self._update_icons()
 
-    def show_main(self) -> None:
+    def show_main(self, task_id: str | None = None) -> None:
         self.edge_tasks.hide()
         self.edge_add.hide()
-        self.main_window.refresh()
+        if task_id:
+            self.main_window.show_task(task_id)
+        else:
+            self.main_window.refresh()
         self.main_window.show()
         self.main_window.raise_()
         self.main_window.activateWindow()
@@ -185,9 +225,58 @@ class DandoriRuntime(QObject):
         self.edge_tasks.refresh()
 
     def _purge_expired_trash(self) -> None:
-        if self.task_service.purge_expired_tasks():
+        changed = self.task_service.archive_expired_completed_tasks()
+        changed += self.task_service.purge_expired_tasks()
+        if changed:
             self.main_window.refresh()
             self.edge_tasks.refresh()
+
+    def _check_reminders(self) -> None:
+        if self.tray_icon is None:
+            return
+        for reminder in self.task_service.claim_due_reminders():
+            self.last_reminder_task_id = reminder.task_id
+            for action in (*self.snooze_actions, self.complete_reminder_action):
+                action.setEnabled(True)
+            due_text = (
+                reminder.due_at.strftime("%Y/%m/%d %H:%M")
+                if reminder.due_at
+                else "期限なし"
+            )
+            timeout = int(
+                self.task_service.get_setting("notification_timeout_seconds", 15)
+            )
+            self.tray_icon.showMessage(
+                f"{reminder.priority.label} · タスクの期限が近づいています",
+                f"{reminder.title}\n期限 {due_text}\nクリックすると詳細を開きます。",
+                QSystemTrayIcon.MessageIcon.Information,
+                timeout * 1000,
+            )
+
+    def _notification_clicked(self) -> None:
+        if self.last_reminder_task_id:
+            self.show_main(self.last_reminder_task_id)
+
+    def _snooze_last_reminder(self, minutes: int) -> None:
+        if not self.last_reminder_task_id:
+            return
+        try:
+            self.task_service.snooze_task(self.last_reminder_task_id, minutes)
+        except ValueError as error:
+            QMessageBox.warning(None, "再通知できません", str(error))
+
+    def _complete_last_reminder(self) -> None:
+        if not self.last_reminder_task_id:
+            return
+        try:
+            self.task_service.complete_task(self.last_reminder_task_id)
+        except (ValueError, LookupError):
+            return
+        self.main_window.refresh()
+        self.edge_tasks.refresh()
+        self.last_reminder_task_id = None
+        for action in (*self.snooze_actions, self.complete_reminder_action):
+            action.setEnabled(False)
 
     def _tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
@@ -233,6 +322,8 @@ class DandoriRuntime(QObject):
     def quit(self) -> None:
         self.main_window.hide_to_tray = False
         self.hotkeys.stop()
+        self.reminder_timer.stop()
+        self.trash_purge_timer.stop()
         self.single_instance.stop()
         self.tray_icon.hide() if self.tray_icon else None
         self.database.dispose()

@@ -5,6 +5,7 @@ from datetime import date, time
 from PySide6.QtCore import QDate
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDateEdit,
     QDialog,
@@ -24,8 +25,14 @@ from PySide6.QtWidgets import (
 
 from dandori.domain.enums import ACTIVE_STATUSES, Priority, TaskStatus
 from dandori.infrastructure.models import Task
-from dandori.services.task_service import TaskInput, TaskService
+from dandori.services.task_service import RecurrenceInput, TaskInput, TaskService
 from dandori.ui.category_dialog import CategoryManagerDialog
+from dandori.ui.task_extras import (
+    AttachmentEditor,
+    ReminderControls,
+    RetentionControls,
+    SubtaskEditor,
+)
 from dandori.ui.time_combo import TimeComboBox
 
 
@@ -42,6 +49,7 @@ class TaskDialog(QDialog):
         self.task_service = task_service
         self.task = task
         self.saved_task: Task | None = None
+        self.saved_tasks: list[Task] = []
         self.initial_date = initial_date
         self._allow_close = False
         self.setWindowTitle("タスクを編集" if task else "タスクを追加")
@@ -98,6 +106,46 @@ class TaskDialog(QDialog):
         self.due_time_edit = TimeComboBox()
         self.due_time_edit.set_time(time(17, 0))
 
+        self.retention_controls = RetentionControls()
+        self.reminder_controls = ReminderControls()
+        self.subtask_editor = SubtaskEditor()
+        self.attachment_editor = AttachmentEditor(task_service)
+
+        self.recurrence_enabled = QCheckBox("期間と曜日を指定して繰り返し作成")
+        self.apply_recurrence_group = QCheckBox(
+            "同じ繰り返しグループの未完了タスクにも反映"
+        )
+        self.recurrence_widget = QWidget()
+        recurrence_layout = QVBoxLayout(self.recurrence_widget)
+        recurrence_layout.setContentsMargins(0, 0, 0, 0)
+        recurrence_layout.setSpacing(6)
+        recurrence_dates = QHBoxLayout()
+        self.recurrence_start = QDateEdit(
+            QDate(base_date.year, base_date.month, base_date.day)
+        )
+        self.recurrence_start.setCalendarPopup(True)
+        self.recurrence_start.setDisplayFormat("yyyy/MM/dd")
+        self.recurrence_end = QDateEdit(
+            QDate(base_date.year, base_date.month, base_date.day)
+        )
+        self.recurrence_end.setCalendarPopup(True)
+        self.recurrence_end.setDisplayFormat("yyyy/MM/dd")
+        recurrence_dates.addWidget(QLabel("開始"))
+        recurrence_dates.addWidget(self.recurrence_start, 1)
+        recurrence_dates.addWidget(QLabel("終了"))
+        recurrence_dates.addWidget(self.recurrence_end, 1)
+        recurrence_layout.addLayout(recurrence_dates)
+        weekdays_layout = QHBoxLayout()
+        self.weekday_checks: list[QCheckBox] = []
+        for index, label in enumerate(("月", "火", "水", "木", "金", "土", "日")):
+            checkbox = QCheckBox(label)
+            checkbox.setChecked(index < 5)
+            self.weekday_checks.append(checkbox)
+            weekdays_layout.addWidget(checkbox)
+        recurrence_layout.addLayout(weekdays_layout)
+        self.include_holidays = QCheckBox("祝日にも作成")
+        recurrence_layout.addWidget(self.include_holidays)
+
         form_widget = QWidget()
         form = QFormLayout(form_widget)
         form.setContentsMargins(0, 0, 0, 0)
@@ -112,6 +160,15 @@ class TaskDialog(QDialog):
         form.addRow("期限", self.due_mode)
         form.addRow("期限日", self.due_date_edit)
         form.addRow("期限時刻", self.due_time_edit)
+        if task is None:
+            form.addRow("繰り返し", self.recurrence_enabled)
+            form.addRow("繰り返し条件", self.recurrence_widget)
+        elif task.recurrence_group_id is not None:
+            form.addRow("一括反映", self.apply_recurrence_group)
+        form.addRow("リマインド", self.reminder_controls)
+        form.addRow("完了後の保存", self.retention_controls)
+        form.addRow("サブタスク", self.subtask_editor)
+        form.addRow("添付ファイル", self.attachment_editor)
         self.due_date_label = form.labelForField(self.due_date_edit)
         self.due_time_label = form.labelForField(self.due_time_edit)
 
@@ -137,14 +194,19 @@ class TaskDialog(QDialog):
         layout.addWidget(self.buttons)
 
         self.due_mode.currentIndexChanged.connect(self._sync_due_controls)
+        self.recurrence_enabled.toggled.connect(self.recurrence_widget.setVisible)
         self._load_task(task, initial_input)
         self._sync_due_controls()
+        self.recurrence_widget.setVisible(
+            task is None and self.recurrence_enabled.isChecked()
+        )
         self._initial_state = self._draft_state()
         QShortcut(QKeySequence("Ctrl+Return"), self).activated.connect(self._save)
         QShortcut(QKeySequence("Ctrl+Enter"), self).activated.connect(self._save)
         self.title_edit.setFocus()
 
     def _load_task(self, task: Task | None, initial_input: TaskInput | None) -> None:
+        self.attachment_editor.set_task(task)
         if task is None:
             self.priority_combo.setCurrentIndex(int(Priority.NORMAL) - 1)
             self.status_combo.setCurrentIndex(0)
@@ -178,8 +240,17 @@ class TaskDialog(QDialog):
                     )
                     if initial_input.due_time is not None:
                         self.due_time_edit.set_time(initial_input.due_time)
+                self.retention_controls.set_value(initial_input.retention_days)
+                self.reminder_controls.set_values(
+                    initial_input.reminder_mode,
+                    initial_input.reminder_config,
+                    initial_input.priority,
+                )
             elif self.initial_date is not None:
                 self.due_mode.setCurrentIndex(1)
+            else:
+                self.retention_controls.set_value(365)
+                self.reminder_controls.set_values("priority", {}, Priority.NORMAL)
             return
         self.title_edit.setText(task.title)
         self.memo_edit.setPlainText(task.memo)
@@ -188,6 +259,13 @@ class TaskDialog(QDialog):
         self.status_combo.setCurrentIndex(self.status_combo.findData(task.status_enum))
         self.priority_combo.setCurrentIndex(self.priority_combo.findData(task.priority_enum))
         self.category_combo.setCurrentIndex(self.category_combo.findData(task.category_id))
+        self.retention_controls.set_value(task.retention_days)
+        self.reminder_controls.set_values(
+            task.reminder_mode,
+            self.task_service._reminder_json(task),
+            task.priority_enum,
+        )
+        self.subtask_editor.set_subtasks(task.subtasks)
         if task.due_at:
             self.due_date_edit.setDate(QDate(task.due_at.year, task.due_at.month, task.due_at.day))
             self.due_mode.setCurrentIndex(2 if task.due_has_time else 1)
@@ -240,6 +318,23 @@ class TaskDialog(QDialog):
             due_date=due_date_value,
             due_time=due_time_value,
             category_id=self.category_combo.currentData(),
+            retention_days=self.retention_controls.value(),
+            reminder_mode=self.reminder_controls.mode(),
+            reminder_config=self.reminder_controls.config(),
+        )
+
+    def _recurrence_input(self) -> RecurrenceInput:
+        start = self.recurrence_start.date()
+        end = self.recurrence_end.date()
+        return RecurrenceInput(
+            start_date=date(start.year(), start.month(), start.day()),
+            end_date=date(end.year(), end.month(), end.day()),
+            weekdays=tuple(
+                index
+                for index, checkbox in enumerate(self.weekday_checks)
+                if checkbox.isChecked()
+            ),
+            include_holidays=self.include_holidays.isChecked(),
         )
 
     def _save(self) -> None:
@@ -247,8 +342,32 @@ class TaskDialog(QDialog):
             task_input = self._task_input()
             if self.task:
                 self.saved_task = self.task_service.update_task(self.task.id, task_input)
+                subtask_inputs = self.subtask_editor.inputs()
+                self.task_service.replace_subtasks(self.task.id, subtask_inputs)
+                if self.apply_recurrence_group.isChecked():
+                    self.saved_tasks = self.task_service.apply_recurrence_changes(
+                        self.task.id, subtask_inputs
+                    )
+                else:
+                    self.saved_tasks = [self.saved_task]
+                attachment_task_ids = [self.task.id]
+            elif self.recurrence_enabled.isChecked():
+                self.saved_tasks = self.task_service.create_recurring_tasks(
+                    task_input,
+                    self._recurrence_input(),
+                    self.subtask_editor.inputs(),
+                )
+                self.saved_task = self.saved_tasks[0]
+                attachment_task_ids = [task.id for task in self.saved_tasks]
             else:
                 self.saved_task = self.task_service.create_task(task_input)
+                self.task_service.replace_subtasks(
+                    self.saved_task.id, self.subtask_editor.inputs()
+                )
+                self.saved_tasks = [self.saved_task]
+                attachment_task_ids = [self.saved_task.id]
+            self.attachment_editor.apply(attachment_task_ids)
+            self.saved_task = self.task_service.get_task(self.saved_task.id)
         except (ValueError, LookupError) as error:
             QMessageBox.warning(self, "保存できません", str(error))
             return
@@ -267,6 +386,16 @@ class TaskDialog(QDialog):
             self.due_mode.currentData(),
             self.due_date_edit.date().toString("yyyy-MM-dd"),
             self.due_time_edit.currentText(),
+            self.recurrence_enabled.isChecked(),
+            self.recurrence_start.date().toString("yyyy-MM-dd"),
+            self.recurrence_end.date().toString("yyyy-MM-dd"),
+            tuple(checkbox.isChecked() for checkbox in self.weekday_checks),
+            self.include_holidays.isChecked(),
+            self.apply_recurrence_group.isChecked(),
+            self.retention_controls.state(),
+            self.reminder_controls.state(),
+            self.subtask_editor.state(),
+            self.attachment_editor.state(),
         )
 
     def _confirm_discard(self) -> bool:

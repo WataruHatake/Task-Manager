@@ -197,6 +197,16 @@ class MainWindow(QMainWindow):
             self.list_button.click()
         self.refresh()
 
+    def show_task(self, task_id: str) -> None:
+        self.current_task_view = "all"
+        self.nav_buttons["all"].setChecked(True)
+        self.list_button.setChecked(True)
+        self.pages.setCurrentWidget(self.table_page)
+        self.page_title.setText(self.VIEW_TITLES["all"])
+        self.search_edit.clear()
+        self.search_edit.setVisible(True)
+        self.refresh(task_id)
+
     def _change_view(self, view_id: int) -> None:
         if view_id == 1 and self.current_task_view != "all":
             self.current_task_view = "all"

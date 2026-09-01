@@ -6,7 +6,7 @@ from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import QMessageBox, QPushButton
 
 from dandori.domain.enums import Priority, TaskStatus
-from dandori.services.task_service import TaskInput
+from dandori.services.task_service import RecurrenceInput, TaskInput
 from dandori.ui.calendar_page import CalendarPage
 from dandori.ui.edge_windows import EdgeAddWindow, EdgeTaskWindow
 from dandori.ui.main_window import MainWindow
@@ -291,3 +291,64 @@ def test_theme_rows_are_clickable_and_dialog_is_small_screen_friendly(qtbot):
 
     assert dialog.palette_key == "cotton-bloom"
     assert dialog.minimumHeight() <= 420
+
+
+def test_task_dialog_creates_recurring_tasks_with_subtasks(qtbot, task_service):
+    dialog = TaskDialog(task_service)
+    qtbot.addWidget(dialog)
+    target = date.today() + timedelta(days=1)
+    target_qdate = QDate(target.year, target.month, target.day)
+    dialog.title_edit.setText("定例確認")
+    dialog.recurrence_enabled.setChecked(True)
+    dialog.recurrence_start.setDate(target_qdate)
+    dialog.recurrence_end.setDate(target_qdate)
+    for index, checkbox in enumerate(dialog.weekday_checks):
+        checkbox.setChecked(index == target.weekday())
+    dialog.include_holidays.setChecked(True)
+    dialog.subtask_editor.add_row("資料を確認")
+
+    dialog._save()
+
+    assert len(dialog.saved_tasks) == 1
+    saved = task_service.get_task(dialog.saved_tasks[0].id)
+    assert saved.recurrence_group_id is not None
+    assert [item.title for item in saved.subtasks] == ["資料を確認"]
+
+
+def test_task_dialog_edits_reminder_and_retention(qtbot, task_service):
+    task = task_service.create_task(TaskInput(title="通知編集"))
+    dialog = TaskDialog(task_service, task=task_service.get_task(task.id))
+    qtbot.addWidget(dialog)
+    dialog.reminder_controls.mode_combo.setCurrentIndex(
+        dialog.reminder_controls.mode_combo.findData("off")
+    )
+    dialog.retention_controls.days.setValue(90)
+
+    dialog._save()
+
+    updated = task_service.get_task(task.id)
+    assert updated.reminder_mode == "off"
+    assert updated.retention_days == 90
+
+
+def test_task_dialog_can_apply_recurring_edits_to_group(qtbot, task_service):
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+    tasks = task_service.create_recurring_tasks(
+        TaskInput(title="編集前"),
+        RecurrenceInput(
+            start_date=today,
+            end_date=tomorrow,
+            weekdays=(today.weekday(), tomorrow.weekday()),
+            include_holidays=True,
+        ),
+    )
+    dialog = TaskDialog(task_service, task=task_service.get_task(tasks[0].id))
+    qtbot.addWidget(dialog)
+    dialog.title_edit.setText("一括編集後")
+    dialog.apply_recurrence_group.setChecked(True)
+
+    dialog._save()
+
+    assert task_service.get_task(tasks[0].id).title == "一括編集後"
+    assert task_service.get_task(tasks[1].id).title == "一括編集後"

@@ -109,6 +109,11 @@ QFrame#surface, QFrame#detailSurface, QFrame#edgeCard, QFrame#paletteRow {
     border: 1px solid $border;
     border-radius: 11px;
 }
+QFrame#embeddedEditor {
+    background: $surface_alt;
+    border: 1px solid $border;
+    border-radius: 10px;
+}
 QFrame#undoBar {
     background: $selection;
     border: 1px solid $accent;

@@ -70,6 +70,8 @@ class Task(Base):
         ForeignKey("recurrence_groups.id"), nullable=True
     )
     retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True, default=365)
+    reminder_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="priority")
+    reminder_config_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -90,6 +92,9 @@ class Task(Base):
         back_populates="task", cascade="all, delete-orphan"
     )
     history: Mapped[list[TaskHistory]] = relationship(
+        back_populates="task", cascade="all, delete-orphan"
+    )
+    reminder_events: Mapped[list[ReminderEvent]] = relationship(
         back_populates="task", cascade="all, delete-orphan"
     )
 
@@ -207,6 +212,8 @@ class ReminderEvent(Base):
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     action: Mapped[str | None] = mapped_column(String(30), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=local_now)
+
+    task: Mapped[Task] = relationship(back_populates="reminder_events")
 
 
 class Setting(Base):
